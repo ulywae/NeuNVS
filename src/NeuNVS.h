@@ -52,7 +52,7 @@ public:
     };
 
     NeuNVS();
-    ~NeuNVS();  // Destructor untuk cleanup
+    ~NeuNVS();  // Destructor for cleanup
     bool begin(uint32_t intervalMs = 1000, uint32_t lockSec = 5, uint8_t maxCommits = 5);
     void end();  // Cleanup method
     void update();
