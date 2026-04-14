@@ -57,9 +57,16 @@ Tested on ESP32-D0WDQ6 (Higher is better for speed, lower for latency):
 
 ### Arduino IDE
 
-1. Download this repository as a `.zip`
-2. Go to **Sketch** → **Include Library** → **Add .ZIP Library**
-3. Select the downloaded file
+Method 1: Library Manager (Recommended)
+
+1. Go to Sketch → Include Library → Manage Libraries...
+2. Type "NeuNVS" in the search bar.
+3. Click Install on the latest version.
+
+Method 2: Manual Installation
+1. Download this repository as a .zip file.
+2. Go to Sketch → Include Library → Add .ZIP Library...
+3. Select the downloaded file from your computer.
 
 ### PlatformIO
 
@@ -292,7 +299,7 @@ Distributed under the MIT License. See LICENSE for more information.
 
 ## Author
 
-Created by ulywae @ Neu
+Created by Ulywae @ Neu
 
 ---
 
