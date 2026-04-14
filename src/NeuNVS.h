@@ -1,5 +1,5 @@
-#ifndef SECURE_EEPROM_H
-#define SECURE_EEPROM_H
+#ifndef NEUNVS_H
+#define NEUNVS_H
 
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -19,8 +19,9 @@ private:
 
     uint8_t _commitCount;
     uint32_t _lockdownUntil;
-    const uint8_t _maxCommits;
+    uint8_t _maxCommits;           // Made non-const to be configurable
     uint32_t _lockdownDuration;
+    bool _isValid;                  // Flag for instance validity
 
     struct DataHeader
     {
@@ -30,7 +31,10 @@ private:
 
     void get_key(uint8_t id, char *keyOut);
     uint16_t calculateXOR(const uint8_t *data, size_t len);
-
+    
+    // Helper untuk dirty check dengan dynamic allocation
+    bool isDataIdentical(uint8_t id, const uint8_t* newData, size_t newSize);
+    
     EEPROMErrorCallback _errorCallback = nullptr;
     void triggerError(uint8_t code, uint8_t id);
 
@@ -42,11 +46,15 @@ public:
         ERR_LOCKDOWN = 1,
         ERR_WRITE_FAILED = 2,
         ERR_ID_NOT_FOUND = 3,
-        ERR_DATA_CORRUPT = 4
+        ERR_DATA_CORRUPT = 4,
+        ERR_SIZE_MISMATCH = 5,
+        ERR_INSTANCE_INVALID = 6
     };
 
     NeuNVS();
-    bool begin(uint32_t intervalMs = 1000, uint32_t lockSec = 5);
+    ~NeuNVS();  // Destructor untuk cleanup
+    bool begin(uint32_t intervalMs = 1000, uint32_t lockSec = 5, uint8_t maxCommits = 5);
+    void end();  // Cleanup method
     void update();
     bool commit();
     bool isLocked();
@@ -54,78 +62,97 @@ public:
     bool clearAll();
     void dump(uint8_t id);
     bool exists(uint8_t id);
-    size_t freeEntries();
+    size_t getTotalFreeEntries();  // Renamed to avoid confusion
     void onError(EEPROMErrorCallback callback);
+    
+    // Get instance info
+    const char* getNamespace() const { return _currentNS; }
+    bool isValid() const { return _isValid; }
 
-    // Special functions for String (Optional to use)
+    // String methods with XOR protection
     void putString(uint8_t id, const String &value);
     String getString(uint8_t id, const String &defaultValue = "");
 
+    // Template methods for POD types
     template <typename T>
     void put(uint8_t id, const T &value)
     {
-        if (millis() < _lockdownUntil)
+        // Validation
+        if (millis() < _lockdownUntil || !_isValid)
             return;
 
         char key[6];
         get_key(id, key);
 
         size_t totalSize = sizeof(DataHeader) + sizeof(T);
-        uint8_t buffer[totalSize];
-
+        
+        // Use dynamic allocation for variable size
+        uint8_t* buffer = (uint8_t*)malloc(totalSize);
+        if (!buffer) return; // Allocation failed
+        
         DataHeader header = {calculateXOR((uint8_t *)&value, sizeof(T)), (uint16_t)sizeof(T)};
         memcpy(buffer, &header, sizeof(DataHeader));
         memcpy(buffer + sizeof(DataHeader), &value, sizeof(T));
 
-        size_t existingSize = 0;
-        nvs_get_blob(_handle, key, NULL, &existingSize);
-        if (existingSize == totalSize)
+        // Dirty check with existing data
+        if (!isDataIdentical(id, buffer, totalSize))
         {
-            uint8_t existingData[totalSize];
-            nvs_get_blob(_handle, key, existingData, &existingSize);
-            if (memcmp(existingData, buffer, totalSize) == 0)
-                return;
+            if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
+                _isDirty = true;
         }
-
-        if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
-            _isDirty = true;
+        
+        free(buffer);
     }
 
     template <typename T>
     T get(uint8_t id, T defaultValue = T())
     {
+        if (!_isValid) return defaultValue;
+        
         char key[6];
         get_key(id, key);
 
         size_t storedSize = 0;
         esp_err_t err = nvs_get_blob(_handle, key, NULL, &storedSize);
 
-        // 1. Check if ID exists in NVS
+        // Check if ID exists
         if (err == ESP_ERR_NVS_NOT_FOUND)
-            // No need to trigger error because maybe the data is created for the first time
             return defaultValue;
 
-        // 2. Check size compatibility (prevent wrong data type)
+        // Validate size compatibility
         if (storedSize != sizeof(DataHeader) + sizeof(T))
         {
-            triggerError(ERR_ID_NOT_FOUND, id); // ERR_ID_NOT_FOUND atau ERR_SIZE_MISMATCH
+            triggerError(ERR_SIZE_MISMATCH, id);
             return defaultValue;
         }
 
-        uint8_t buffer[storedSize];
+        uint8_t* buffer = (uint8_t*)malloc(storedSize);
+        if (!buffer) return defaultValue;
+        
         if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
+        {
+            free(buffer);
             return defaultValue;
+        }
 
         DataHeader header;
         memcpy(&header, buffer, sizeof(DataHeader));
 
         T result;
         memcpy(&result, buffer + sizeof(DataHeader), sizeof(T));
+        free(buffer);
 
-        // 3. XOR Validation (Check data integrity)
+        // XOR Validation
         if (header.xorSum != calculateXOR((uint8_t *)&result, sizeof(T)))
         {
-            triggerError(ERR_DATA_CORRUPT, id); // ERR_DATA_CORRUPT
+            triggerError(ERR_DATA_CORRUPT, id);
+            return defaultValue;
+        }
+
+        // Validate dataSize
+        if (header.dataSize != sizeof(T))
+        {
+            triggerError(ERR_SIZE_MISMATCH, id);
             return defaultValue;
         }
 
@@ -133,8 +160,8 @@ public:
     }
 };
 
-#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_EEPROM)
-extern NeuNVS NVS;
+#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_NEUNVS)
+extern NeuNVS NeuNVS;
 #endif
 
 #endif
