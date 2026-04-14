@@ -1,0 +1,40 @@
+#######################################
+# Syntax Coloring Map For NeuNVS
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+NeuNVS	KEYWORD1
+NVS	LITERAL1
+NeuError	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+update	KEYWORD2
+commit	KEYWORD2
+put	KEYWORD2
+get	KEYWORD2
+putString	KEYWORD2
+getString	KEYWORD2
+exists	KEYWORD2
+remove	KEYWORD2
+clearAll	KEYWORD2
+dump	KEYWORD2
+freeEntries	KEYWORD2
+onError	KEYWORD2
+isLocked	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+ERR_NONE	LITERAL1
+ERR_LOCKDOWN	LITERAL1
+ERR_WRITE_FAILED	LITERAL1
+ERR_ID_NOT_FOUND	LITERAL1
+ERR_DATA_CORRUPT	LITERAL1
