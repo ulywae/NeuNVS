@@ -17,10 +17,11 @@ It focuses on extreme performance, data integrity, and physical hardware protect
 Standard libraries like `Preferences` often carry heavy overhead due to string-based keys, lack of hardware safety, and **no corruption detection**.
 
 **NeuNVS** solves this by using:
+
 - **ID-based system** (0-255) for ultra-fast access
 - **XOR checksum** on every data block
 - **Auto-lockdown** to prevent flash wear from buggy loops
-- **Zero heap allocation** - no fragmentation!
+- **Dynamic Memory Management** - no fragmentation!
 
 ---
 
@@ -55,11 +56,13 @@ Tested on ESP32-D0WDQ6 (Higher is better for speed, lower for latency):
 ## Installation
 
 ### Arduino IDE
+
 1. Download this repository as a `.zip`
 2. Go to **Sketch** → **Include Library** → **Add .ZIP Library**
 3. Select the downloaded file
 
 ### PlatformIO
+
 ```ini
 lib_deps =
     https://github.com/ulywae/NeuNVS.git
@@ -78,28 +81,34 @@ void setup() {
     Serial.begin(115200);
 
     // Initialize with 1s auto-commit interval, 5s lockdown duration, max 5 commits before lockdown
-    if (!NeuNVS.begin(1000, 5, 5)) {
+    if (!neuNVS.begin(1000, 5, 5)) {
         Serial.println("Failed to initialize NeuNVS!");
         return;
     }
 
     // Write data (ID-based, no strings needed!)
     uint32_t myData = 1337;
-    NeuNVS.put(1, myData);
+    neuNVS.put(1, myData);
 
     // Read data safely with XOR validation
-    uint32_t savedData = NeuNVS.get<uint32_t>(1);
-    Serial.printf("Saved Data: %u\n", savedData);
-    
+    uint32_t savedData;
+    if (neuNVS.get(1, savedData)) {
+        Serial.printf("Saved Data: %u\n", savedData);
+    }
+
+    else {
+        Serial.println("uint32_t data failed to read!");
+    }
+
     // String with XOR protection
-    NeuNVS.putString(10, "Hello NeuNVS!");
-    String str = NeuNVS.getString(10);
+    neuNVS.putString(10, "Hello NeuNVS!");
+    String str = neuNVS.getString(10);
     Serial.println(str);
 }
 
 void loop() {
     // Call update() to process auto-commits safely
-    NeuNVS.update();
+    neuNVS.update();
 }
 ```
 
@@ -130,22 +139,24 @@ void onStorageError(uint8_t code, uint8_t id) {
 }
 
 void setup() {
-    NeuNVS.onError(onStorageError);
-    NeuNVS.begin();
+    neuNVS.onError(onStorageError);
+    neuNVS.begin();
 }
 ```
 
 ### Manual Commit & Clean
 
 ```cpp
-NeuNVS.put(5, 100);
-NeuNVS.commit();   // Force immediate write
+neuNVS.put(5, 100);
+neuNVS.commit();   // Force immediate write
 
-NeuNVS.remove(5);  // Delete specific ID
-NeuNVS.clearAll(); // Factory reset entire namespace
+neuNVS.remove(5);  // Delete specific ID
+neuNVS.clearAll(); // Factory reset entire namespace
 ```
 
 ### Multiple Instances
+
+Each instance is automatically assigned a unique namespace (ns0, ns1, etc.), ensuring no data collisions between different storage objects.
 
 ```cpp
 NeuNVS configStorage;
@@ -154,7 +165,7 @@ NeuNVS userStorage;
 void setup() {
     configStorage.begin(1000, 5, 3);  // ns0
     userStorage.begin(2000, 10, 5);   // ns1
-    
+
     configStorage.put(1, 9600);       // Baud rate config
     userStorage.putString(1, "Alice"); // Username
 }
@@ -163,10 +174,10 @@ void setup() {
 ### Check Lockdown Status
 
 ```cpp
-if (NeuNVS.isLocked()) {
+if (neuNVS.isLocked()) {
     Serial.println("System is locked! Waiting for cooldown...");
 } else {
-    NeuNVS.put(99, 123);
+    neuNVS.put(99, 123);
 }
 ```
 
@@ -174,99 +185,114 @@ if (NeuNVS.isLocked()) {
 
 ### Error Codes
 
-Code Name Description
-0 ERR_NONE No error
-1 ERR_LOCKDOWN Hardware protection active (too many writes)
-2 ERR_WRITE_FAILED Flash write operation failed
-3 ERR_ID_NOT_FOUND ID doesn't exist in storage
-4 ERR_DATA_CORRUPT XOR checksum mismatch (data corrupted!)
-5 ERR_SIZE_MISMATCH Data type size doesn't match stored data
-6 ERR_INSTANCE_INVALID Too many instances created (max 254)
+| Code | Name                   | Description                                        |
+| :--- | :--------------------- | :------------------------------------------------- |
+| 0    | `ERR_NONE`             | Operation successful.                              |
+| 1    | `ERR_LOCKDOWN`         | Abuse protection active! Too many writes detected. |
+| 2    | `ERR_WRITE_FAILED`     | Flash write operation failed at NVS level.         |
+| 3    | `ERR_ID_NOT_FOUND`     | Requested ID doesn't exist.                        |
+| 4    | `ERR_DATA_CORRUPT`     | XOR checksum mismatch (Data is corrupted!).        |
+| 5    | `ERR_SIZE_MISMATCH`    | Data size doesn't match the stored value.          |
+| 6    | `ERR_INSTANCE_INVALID` | Instance limit reached (Max 254).                  |
+| 7    | `ERR_ALLOC_FAILED`     | Out of RAM (Heap) while processing data.           |
 
 ---
 
 ## API Reference
 
-### Initialization
+### Initialization & Core
 
-Method Description
-begin(intervalMs, lockSec, maxCommits) Initialize NVS with auto-commit interval (ms), lockdown duration (seconds), and max commits before lockdown
-end() Close NVS handle and cleanup
-update() Call in loop() to process auto-commits
+| Method                       | Description                                                      |
+| :--------------------------- | :--------------------------------------------------------------- |
+| `begin(interval, lock, max)` | Init NVS with interval (ms), lockdown (sec), and max commits.    |
+| `update()`                   | **Must be called in `loop()`** to process pending auto-commits.  |
+| `commit()`                   | Manually trigger a write to Flash (subject to Abuse Protection). |
+| `end()`                      | Close NVS handle and cleanup.                                    |
+
+---
 
 ### Data Operations
 
-Method Description
-put<T>(id, value) Store any POD type (int, float, struct, etc.)
-get<T>(id, defaultValue) Retrieve data with XOR validation
-putString(id, value) Store String with XOR protection
-getString(id, defaultValue) Retrieve String with XOR validation
-exists(id) Check if ID exists
-remove(id) Delete specific ID
-clearAll() Delete all data in namespace
-commit() Force immediate write
+| Method                         | Description                                                                  |
+| :----------------------------- | :--------------------------------------------------------------------------- |
+| `put(id, value)`               | Store any **POD** type (int, float, struct, etc.) with automatic XOR header. |
+| `get(id, outValue, default)`   | Retrieve data with XOR validation. Returns `true` if successful.             |
+| `putString(id, value)`         | Store `String` object with XOR protection.                                   |
+| `getString(id, &out, default)` | Retrieve `String` with XOR validation and default value fallback.            |
+| `exists(id)`                   | Returns `true` if the specific ID exists in current namespace.               |
+| `remove(id)`                   | Delete a specific ID and its associated data.                                |
+| `clearAll()`                   | Wipe all data in the current namespace (Factory Reset).                      |
+| `commit()`                     | Force immediate write to Flash (subject to Abuse Protection).                |
 
-### Status & Info
+---
 
-Method Description
-isLocked() Check if hardware lockdown is active
-isValid() Check if instance was created successfully
-getNamespace() Get current namespace name
-getTotalFreeEntries() Get free NVS entries (global)
-dump(id) Print hex dump for debugging
+### Status & Debugging
+
+| Method                  | Description                                              |
+| :---------------------- | :------------------------------------------------------- |
+| `isLocked()`            | Returns `true` if hardware lockdown is currently active. |
+| `isValid()`             | Check if instance was created successfully (max 254).    |
+| `getNamespace()`        | Returns current namespace name (e.g., `ns0`).            |
+| `getTotalFreeEntries()` | Get global free NVS entries.                             |
+| `dump(id)`              | Print professional **Hex + ASCII dump** for debugging.   |
 
 ---
 
 ## Technical Specifications
 
-Parameter Value
-Namespace Auto (ns0 - ns253)
-ID Range 0 - 255 (uint8_t)
-Key Format i[ID] (e.g., i255)
-Overhead 4 bytes per entry (XOR + Size)
-Max Instances 254
-Default Auto-Commit 1000 ms
-Default Lockdown Duration 5 seconds
-Default Max Commits 5 before lockdown
+| Parameter                | Value / Detail                                  |
+| :----------------------- | :---------------------------------------------- |
+| **Namespace Management** | Automatic Rotation (`ns0` to `ns253`)           |
+| **Indexing System**      | ID-based (`uint8_t`), range `0` - `255`         |
+| **Internal Key Format**  | `id[ID]` (e.g., ID 255 becomes key `id255`)     |
+| **Data Overhead**        | **4 Bytes** per entry (2b XOR + 2b Size Header) |
+| **Instance Limit**       | Up to **254** simultaneous instances            |
+| **Default Auto-Commit**  | `1000 ms` (Configurable)                        |
+| **Default Lockdown**     | `5 seconds` duration after `5` rapid commits    |
+| **Storage Engine**       | Native ESP-IDF NVS                              |
 
 ---
 
 ## Requirements
 
 · ESP32 (all variants: D0WD, D0WDQ6, S3, C3, etc.)
+
 · Arduino ESP32 core (tested with v2.0.0+)
+
 · C++11 or later
 
 ---
 
 ## Limitations
 
-· Data types must be trivially copyable (POD types). For complex objects, use putString() or serialize manually.
-· Not thread-safe for interrupt context (use with care in RTOS tasks).
-· Max 254 simultaneous instances.
-· String maximum size limited by available NVS blob space (~4000 bytes).
+· POD Types Only: Objects must be Trivially Copyable. Do not use classes with virtual methods or dynamic pointers inside put().
+
+· String Size: Limited by NVS blob constraints (~4000 bytes max).
+
+· Thread Safety: Not thread-safe for multi-tasking (use Mutex if accessing from different FreeRTOS tasks).
 
 ---
 
 ## Migration from Preferences
 
-Preferences NeuNVS
-preferences.putInt("key", 10) NeuNVS.put(1, 10)
-preferences.getInt("key", 0) NeuNVS.get<int>(1, 0)
-preferences.putString("str", "hi") NeuNVS.putString(1, "hi")
-preferences.clear() NeuNVS.clearAll()
+| Preferences                        | NeuNVS                    |
+| :--------------------------------- | :------------------------ |
+| preferences.putInt("key", 10)      | NeuNVS.put(1, 10)         |
+| preferences.getInt("key", 0)       | NeuNVS.get(1, 0)          |
+| preferences.putString("str", "hi") | NeuNVS.putString(1, "hi") |
+| preferences.clear()                | NeuNVS.clearAll()         |
 
 ---
 
 ## License
 
-Distributed under the MIT License. See LICENSE file for more information.
+Distributed under the MIT License. See LICENSE for more information.
 
 ---
 
 ## Author
 
-### ulywae @ Neu
+Created by ulywae @ Neu
 
 ---
 
@@ -276,10 +302,8 @@ Issues and pull requests are welcome! For major changes, please open an issue fi
 
 ---
 
-Star History
+### Star History
 
 If you find this library useful, please give it a on GitHub!
-
-```
 
 ---

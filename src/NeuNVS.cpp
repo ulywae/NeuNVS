@@ -6,7 +6,6 @@ NeuNVS::NeuNVS() : _lastCommitTime(0), _interval(1000), _isDirty(false),
                    _commitCount(0), _lockdownUntil(0),
                    _maxCommits(5), _lockdownDuration(5000), _isValid(true)
 {
-    // Automatically create unique namespace names: ns0, ns1, ns2...
     if (_instanceCount < 254)
     {
         snprintf(_currentNS, sizeof(_currentNS), "ns%u", _instanceCount);
@@ -26,8 +25,9 @@ NeuNVS::~NeuNVS()
 
 bool NeuNVS::begin(uint32_t intervalMs, uint32_t lockSec, uint8_t maxCommits)
 {
-    if (!_isValid) return false;
-    
+    if (!_isValid)
+        return false;
+
     _interval = intervalMs;
     _lockdownDuration = lockSec * 1000;
     _maxCommits = maxCommits;
@@ -38,10 +38,9 @@ bool NeuNVS::begin(uint32_t intervalMs, uint32_t lockSec, uint8_t maxCommits)
         nvs_flash_erase();
         err = nvs_flash_init();
     }
-    
-    if (err != ESP_OK) return false;
+    if (err != ESP_OK)
+        return false;
 
-    // Opens the unique namespace that was created in the constructor
     err = nvs_open(_currentNS, NVS_READWRITE, &_handle);
     return (err == ESP_OK);
 }
@@ -53,36 +52,13 @@ void NeuNVS::end()
         commit();
         nvs_close(_handle);
         _handle = 0;
+        _isValid = false;
     }
 }
 
 void NeuNVS::get_key(uint8_t id, char *keyOut)
 {
-    snprintf(keyOut, 6, "i%u", id);
-}
-
-bool NeuNVS::exists(uint8_t id)
-{
-    if (!_isValid) return false;
-    
-    char key[6];
-    get_key(id, key);
-    size_t size = 0;
-    esp_err_t err = nvs_get_blob(_handle, key, NULL, &size);
-    return (err != ESP_ERR_NVS_NOT_FOUND);
-}
-
-size_t NeuNVS::getTotalFreeEntries()
-{
-    if (!_isValid) return 0;
-    
-    nvs_stats_t nvs_stats;
-    esp_err_t err = nvs_get_stats(NULL, &nvs_stats);
-    if (err == ESP_OK)
-    {
-        return nvs_stats.free_entries;
-    }
-    return 0;
+    snprintf(keyOut, 6, "id%u", id);
 }
 
 uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
@@ -93,23 +69,27 @@ uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
     return xorResult;
 }
 
-bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t* newData, size_t newSize)
+bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
 {
     char key[6];
     get_key(id, key);
-    
+
     size_t existingSize = 0;
-    nvs_get_blob(_handle, key, NULL, &existingSize);
-    
-    if (existingSize != newSize) return false;
-    
-    uint8_t* existingData = (uint8_t*)malloc(existingSize);
-    if (!existingData) return false;
-    
+    if (nvs_get_blob(_handle, key, NULL, &existingSize) != ESP_OK)
+        return false;
+    if (existingSize != newSize)
+        return false;
+
+    uint8_t *existingData = (uint8_t *)malloc(existingSize);
+    if (!existingData)
+    {
+        triggerError(ERR_ALLOC_FAILED, id);
+        return false;
+    }
+
     nvs_get_blob(_handle, key, existingData, &existingSize);
     bool identical = (memcmp(existingData, newData, newSize) == 0);
     free(existingData);
-    
     return identical;
 }
 
@@ -128,18 +108,18 @@ void NeuNVS::update()
 {
     if (!_isValid || !_isDirty || millis() < _lockdownUntil)
         return;
-
     if (millis() - _lastCommitTime >= _interval)
         commit();
 }
 
 bool NeuNVS::commit()
 {
-    if (!_isValid) return false;
-    if (!_isDirty) return true;
+    if (!_isValid)
+        return false;
+    if (!_isDirty)
+        return true;
 
     uint32_t now = millis();
-
     if (now < _lockdownUntil)
     {
         triggerError(ERR_LOCKDOWN, 0);
@@ -182,12 +162,10 @@ bool NeuNVS::remove(uint8_t id)
 {
     if (!_isValid || millis() < _lockdownUntil)
         return false;
-
     char key[6];
     get_key(id, key);
 
-    esp_err_t err = nvs_erase_key(_handle, key);
-    if (err == ESP_OK)
+    if (nvs_erase_key(_handle, key) == ESP_OK)
     {
         _isDirty = true;
         return true;
@@ -199,9 +177,7 @@ bool NeuNVS::clearAll()
 {
     if (!_isValid || millis() < _lockdownUntil)
         return false;
-
-    esp_err_t err = nvs_erase_all(_handle);
-    if (err == ESP_OK)
+    if (nvs_erase_all(_handle) == ESP_OK)
     {
         _isDirty = true;
         return commit();
@@ -209,157 +185,182 @@ bool NeuNVS::clearAll()
     return false;
 }
 
+bool NeuNVS::exists(uint8_t id)
+{
+    if (!_isValid)
+        return false;
+    char key[6];
+    get_key(id, key);
+
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(_handle, key, NULL, &size);
+    return (err != ESP_ERR_NVS_NOT_FOUND);
+}
+
 void NeuNVS::putString(uint8_t id, const String &value)
 {
     if (!_isValid || millis() < _lockdownUntil)
         return;
-
     char key[6];
     get_key(id, key);
-    
+
     size_t dataLen = value.length();
     size_t totalSize = sizeof(DataHeader) + dataLen;
-    
-    uint8_t* buffer = (uint8_t*)malloc(totalSize);
-    if (!buffer) return;
-    
-    DataHeader header = {
-        calculateXOR((uint8_t*)value.c_str(), dataLen),
-        (uint16_t)dataLen
-    };
-    
+    uint8_t *buffer = (uint8_t *)malloc(totalSize);
+    if (!buffer)
+    {
+        triggerError(ERR_ALLOC_FAILED, id);
+        return;
+    }
+
+    DataHeader header = {calculateXOR((uint8_t *)value.c_str(), dataLen), (uint16_t)dataLen};
     memcpy(buffer, &header, sizeof(DataHeader));
     memcpy(buffer + sizeof(DataHeader), value.c_str(), dataLen);
-    
+
     if (!isDataIdentical(id, buffer, totalSize))
     {
         if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
             _isDirty = true;
     }
-    
     free(buffer);
 }
 
-String NeuNVS::getString(uint8_t id, const String &defaultValue)
+bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
 {
-    if (!_isValid) return defaultValue;
-    
+    if (!_isValid)
+    {
+        outValue = defaultValue;
+        return false;
+    }
     char key[6];
     get_key(id, key);
-    
+
     size_t storedSize = 0;
     if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK)
-        return defaultValue;
-    
-    // Validate minimum size (must have header)
+    {
+        outValue = defaultValue;
+        return false;
+    }
     if (storedSize < sizeof(DataHeader))
-        return defaultValue;
-    
-    uint8_t* buffer = (uint8_t*)malloc(storedSize);
-    if (!buffer) return defaultValue;
-    
+    {
+        outValue = defaultValue;
+        return false;
+    }
+
+    uint8_t *buffer = (uint8_t *)malloc(storedSize);
+    if (!buffer)
+    {
+        triggerError(ERR_ALLOC_FAILED, id);
+        outValue = defaultValue;
+        return false;
+    }
+
     if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
     {
         free(buffer);
-        return defaultValue;
+        outValue = defaultValue;
+        return false;
     }
-    
+
     DataHeader header;
     memcpy(&header, buffer, sizeof(DataHeader));
-    
-    // Validate data size consistency
     if (header.dataSize != storedSize - sizeof(DataHeader))
     {
-        free(buffer);
         triggerError(ERR_SIZE_MISMATCH, id);
-        return defaultValue;
+        free(buffer);
+        outValue = defaultValue;
+        return false;
     }
-    
-    // Validate XOR checksum
     if (header.xorSum != calculateXOR(buffer + sizeof(DataHeader), header.dataSize))
     {
-        free(buffer);
         triggerError(ERR_DATA_CORRUPT, id);
-        return defaultValue;
-    }
-    
-    // Extract string data
-    char* strBuffer = (char*)malloc(header.dataSize + 1);
-    if (!strBuffer)
-    {
         free(buffer);
-        return defaultValue;
+        outValue = defaultValue;
+        return false;
     }
-    
-    memcpy(strBuffer, buffer + sizeof(DataHeader), header.dataSize);
-    strBuffer[header.dataSize] = '\0';
-    
-    String result = String(strBuffer);
-    
-    free(strBuffer);
+
+    outValue = String((char *)(buffer + sizeof(DataHeader)), header.dataSize);
     free(buffer);
-    
-    return result;
+    return true;
 }
 
 void NeuNVS::dump(uint8_t id)
 {
     if (!_isValid)
     {
-        Serial.println("Instance invalid!");
+        Serial.println(F("NeuNVS: Instance invalid!"));
         return;
     }
-    
+
     char key[6];
     get_key(id, key);
-    
+
     size_t storedSize = 0;
-    esp_err_t err = nvs_get_blob(_handle, key, NULL, &storedSize);
-    
-    if (err != ESP_OK)
+    if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK)
     {
-        Serial.printf("ID %u: Not found or empty.\n", id);
+        Serial.printf("ID %u: Key '%s' not found.\n", id, key);
         return;
     }
-    
-    uint8_t* buffer = (uint8_t*)malloc(storedSize);
+
+    uint8_t *buffer = (uint8_t *)malloc(storedSize);
     if (!buffer)
     {
-        Serial.println("Memory allocation failed!");
+        Serial.println(F("NeuNVS: Dump alloc failed!"));
         return;
     }
-    
+
     nvs_get_blob(_handle, key, buffer, &storedSize);
-    
-    Serial.printf("Hex Dump ID %u (%u bytes):\n", id, storedSize);
-    
+
+    Serial.printf("\n--- NeuNVS Dump ID: %u (%u bytes) ---\n", id, (uint32_t)storedSize);
+
     if (storedSize >= sizeof(DataHeader))
     {
         DataHeader header;
         memcpy(&header, buffer, sizeof(DataHeader));
-        Serial.printf("Header: XOR=0x%04X, Size=%u\n", header.xorSum, header.dataSize);
-        Serial.print("Data -> ");
-        
+        Serial.printf("Header -> XOR: 0x%02X, DataSize: %u\n", header.xorSum, header.dataSize);
+
+        Serial.print("Data   -> Hex: ");
         for (size_t i = sizeof(DataHeader); i < storedSize; i++)
         {
             Serial.printf("%02X ", buffer[i]);
-            if ((i - sizeof(DataHeader) + 1) % 16 == 0 && i != storedSize - 1)
-                Serial.println();
         }
-    }
-    else
-    {
-        Serial.println("Raw data (no header):");
-        for (size_t i = 0; i < storedSize; i++)
+
+        Serial.print("\n          Text: ");
+        for (size_t i = sizeof(DataHeader); i < storedSize; i++)
         {
-            Serial.printf("%02X ", buffer[i]);
+            // Cek apakah karakter bisa diprint (ASCII 32-126)
+            if (buffer[i] >= 32 && buffer[i] <= 126)
+            {
+                Serial.print((char)buffer[i]);
+            }
+            else
+            {
+                Serial.print('.'); // Ganti karakter non-printable dengan titik
+            }
         }
     }
-    
-    Serial.println("\n-------------------------------------------");
+    Serial.println(F("\n-------------------------------------------"));
     free(buffer);
 }
 
-#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_NEUNVS)
-NeuNVS NeuNVS;
+size_t NeuNVS::getTotalFreeEntries()
+{
+    if (!_isValid)
+        return 0;
+
+    nvs_stats_t stats;
+    esp_err_t err = nvs_get_stats(NULL, &stats);
+    if (err == ESP_OK)
+    {
+        return stats.free_entries;
+    }
+    else
+    {
+        triggerError(ERR_WRITE_FAILED, 0); // bisa pakai kode error umum
+        return 0;
+    }
+}
+
+#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_EEPROM)
+NeuNVS neuNVS;
 #endif

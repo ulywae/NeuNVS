@@ -7,7 +7,7 @@
 #######################################
 
 NeuNVS	KEYWORD1
-NVS	LITERAL1
+neuNVS	LITERAL1
 NeuError	KEYWORD1
 
 #######################################
@@ -25,9 +25,10 @@ exists	KEYWORD2
 remove	KEYWORD2
 clearAll	KEYWORD2
 dump	KEYWORD2
-freeEntries	KEYWORD2
+getTotalFreeEntries	KEYWORD2
 onError	KEYWORD2
 isLocked	KEYWORD2
+getNamespace	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)

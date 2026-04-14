@@ -79,8 +79,11 @@ void loop()
     { // Print every 5 seconds
         lastPrint = millis();
 
-        uint32_t readVal = storage.get<uint32_t>(1);
-        MyConfig readCfg = storage.get<MyConfig>(2);
+        uint32_t readVal;
+        MyConfig readCfg;
+
+        storage.get(1, readVal);
+        storage.get(2, readCfg);
 
         Serial.println("\n--- Current Data ---");
         Serial.printf("ID 1 (uint32): %u\n", readVal);
