@@ -32,7 +32,7 @@ private:
     void get_key(uint8_t id, char *keyOut);
     uint16_t calculateXOR(const uint8_t *data, size_t len);
     
-    // Helper untuk dirty check dengan dynamic allocation
+    // Helper for dirty check with dynamic allocation
     bool isDataIdentical(uint8_t id, const uint8_t* newData, size_t newSize);
     
     EEPROMErrorCallback _errorCallback = nullptr;
