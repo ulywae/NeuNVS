@@ -39,7 +39,7 @@ Tested on **ESP32-D0WDQ6** (v1.0.1). Results show that NeuNVS significantly outp
 > **Note:** "Dirty Check Skip" refers to the time taken to verify that data hasn't changed, preventing unnecessary Flash writes and extending hardware lifespan.
 
 <p align="center">
-  <img src="assets/benchmark_result.jpg" width="800" alt="NeuNVS Benchmark Log">
+  <img src="assets/benchmark_result.png" width="800" alt="NeuNVS Benchmark Log">
   <br>
   <em>Real-world benchmark log captured from Serial Monitor (ESP32-D0WDQ6)</em>
 </p>
