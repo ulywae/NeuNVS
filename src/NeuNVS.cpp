@@ -2,10 +2,14 @@
 
 uint8_t NeuNVS::_instanceCount = 0;
 
-NeuNVS::NeuNVS() : _lastCommitTime(0), _interval(1000), _isDirty(false),
-                   _commitCount(0), _lockdownUntil(0),
-                   _maxCommits(5), _lockdownDuration(5000), _isValid(true)
+NeuNVS::NeuNVS() : _handle(0), _lastCommitTime(0), _interval(1000),
+                   _isDirty(false), _lockdownUntil(0),
+                   _lockdownDuration(5000), _isValid(true),
+                   _adaptiveInterval(1000), _maxInterval(5000), _maxHeat(10.0f)
 {
+    // Initialize the cache so that it does not contain junk data
+    memset(_xorCache, 0, sizeof(_xorCache));
+
     if (_instanceCount < NeuNVSConstants::MAX_INSTANCES)
     {
         snprintf(_currentNS, sizeof(_currentNS), "ns%u", _instanceCount);
@@ -23,14 +27,14 @@ NeuNVS::~NeuNVS()
     end();
 }
 
-bool NeuNVS::begin(uint32_t intervalMs, uint32_t lockSec, uint8_t maxCommits)
+bool NeuNVS::begin(uint32_t intervalMs, uint32_t lockSec)
 {
     if (!_isValid)
         return false;
 
     _interval = intervalMs;
+    _adaptiveInterval = intervalMs; // Reset adaptive to base interval
     _lockdownDuration = lockSec * 1000;
-    _maxCommits = maxCommits;
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -42,79 +46,48 @@ bool NeuNVS::begin(uint32_t intervalMs, uint32_t lockSec, uint8_t maxCommits)
         return false;
 
     err = nvs_open(_currentNS, NVS_READWRITE, &_handle);
-    return (err == ESP_OK);
+    if (err != ESP_OK)
+        return false;
+
+    // --- WARM UP CACHE ---
+    memset(_xorCache, 0, sizeof(_xorCache));
+
+    for (uint8_t i = 0; i < NeuNVSConstants::MAX_IDS; i++)
+    {
+        char key[NeuNVSConstants::MAX_KEY_LEN];
+        get_key(i, key);
+
+        DataHeader header;
+        size_t required = sizeof(DataHeader);
+
+        esp_err_t readErr = nvs_get_blob(_handle, key, &header, &required);
+
+        // Validation: Ensure the data exists AND has the correct Magic Bytes
+        if ((readErr == ESP_OK || readErr == ESP_ERR_NVS_INVALID_LENGTH) && header.magic == 0xA5)
+        {
+            _xorCache[i] = header.xorChecksum;
+        }
+    }
+
+    return true;
 }
 
 void NeuNVS::end()
 {
     if (_handle)
     {
-        commit();
+        if (_isDirty)
+            commit(); // Only commit if there are actual changes
         nvs_close(_handle);
         _handle = 0;
     }
-    _isValid = false;
 }
 
 void NeuNVS::get_key(uint8_t id, char *keyOut)
 {
-    snprintf(keyOut, NeuNVSConstants::MAX_KEY_LEN, "id%u", id);
-}
-
-uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
-{
-    uint16_t xorResult = 0xAA;
-    for (size_t i = 0; i < len; i++)
-        xorResult ^= data[i];
-    return xorResult;
-}
-
-bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
-{
-    char key[NeuNVSConstants::MAX_KEY_LEN];
-    get_key(id, key);
-
-    size_t existingSize = 0;
-    if (nvs_get_blob(_handle, key, NULL, &existingSize) != ESP_OK)
-        return false;
-    if (existingSize != newSize)
-        return false;
-
-    // --- OPTIMIZATION START ---
-    // Use a stack buffer for data <= STACK_BUFFER_POD bytes (covers almost all PODs & small structs)
-    // This eliminates 'malloc' and 'free' which consume CPU & Heap cycles
-    uint8_t stackBuffer[NeuNVSConstants::STACK_BUFFER_POD];
-    uint8_t *existingData = nullptr;
-
-    if (existingSize <= sizeof(stackBuffer))
-        existingData = stackBuffer;
-    else
-    {
-        existingData = (uint8_t *)malloc(existingSize);
-        if (!existingData)
-        {
-            triggerError(ERR_ALLOC_FAILED, id);
-            return false;
-        }
-    }
-
-    esp_err_t err = nvs_get_blob(_handle, key, existingData, &existingSize);
-    if (err != ESP_OK)
-    {
-        triggerError(ERR_READ_FAILED, id);
-        if (existingData != stackBuffer)
-            free(existingData);
-        return false;
-    }
-
-    bool identical = (memcmp(existingData, newData, newSize) == 0);
-
-    // Only free if you use malloc
-    if (existingData != stackBuffer)
-        free(existingData);
-    // --- END OPTIMIZATION ---
-
-    return identical;
+    // Use "k%u" for shorter and safer buffer size 6
+    // "id255" + null terminator fits 6 bytes.
+    snprintf(keyOut, NeuNVSConstants::MAX_KEY_LEN, "k%u", id);
 }
 
 void NeuNVS::onError(EEPROMErrorCallback callback)
@@ -128,62 +101,125 @@ void NeuNVS::triggerError(uint8_t code, uint8_t id)
         _errorCallback(code, id);
 }
 
-void NeuNVS::update()
-{
-    if (!_isValid || !_isDirty || safeMillis() < _lockdownUntil || !_handle)
-        return;
-    if (safeMillis() - _lastCommitTime >= _interval)
-        commit();
-}
-
-bool NeuNVS::commit()
-{
-    if (!_isValid || !_handle)
-        return false;
-
-    if (!_isDirty)
-        return true;
-
-    uint32_t now = safeMillis();
-    if (now < _lockdownUntil)
-    {
-        triggerError(ERR_LOCKDOWN, 0);
-        return false;
-    }
-
-    if (now - _lastCommitTime < _interval)
-    {
-        _commitCount++;
-        if (_commitCount >= _maxCommits)
-        {
-            _lockdownUntil = now + _lockdownDuration;
-            _commitCount = 0;
-            triggerError(ERR_LOCKDOWN, 0);
-            return false;
-        }
-    }
-    else
-        _commitCount = 0;
-
-    if (nvs_commit(_handle) != ESP_OK)
-    {
-        triggerError(ERR_WRITE_FAILED, 0);
-        return false;
-    }
-
-    _lastCommitTime = now;
-    _isDirty = false;
-    return true;
-}
-
 bool NeuNVS::isLocked()
 {
     return (safeMillis() < _lockdownUntil);
 }
 
+uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
+{
+    uint16_t xorResult = 0xAA55; // A more unique seed for XOR
+    for (size_t i = 0; i < len; i++)
+        xorResult = (xorResult ^ data[i]) + (xorResult << 1); // Variations to minimize collisions
+    return xorResult;
+}
+
+bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
+{
+    if (id >= NeuNVSConstants::MAX_IDS)
+        return false;
+
+    // Take the XOR of the new data sent (located in the first 2 bytes of the buffer)
+    uint16_t newXOR;
+    memcpy(&newXOR, newData, sizeof(uint16_t));
+
+    // Compare with Cache in RAM
+    if (_xorCache[id] == newXOR)
+    {
+        return true;
+    }
+
+    // DO NOT update the cache here.
+    // Cache updates should only be done in put() AFTER nvs_set_blob succeeds.
+    return false;
+}
+
+void NeuNVS::update()
+{
+    if (!_isValid || !_handle || !_isDirty)
+    {
+        // Passive cooling while idle
+        _heat *= 0.98f;
+        return;
+    }
+
+    uint32_t now = safeMillis();
+
+    // Lockdown protection active
+    if (now < _lockdownUntil)
+        return;
+
+    // Adaptive Auto-Commit Logic
+    // We commit if:
+    // 1. The adaptive interval has passed
+    // 2. OR it has been idle for a long time (no new put()s have been received)
+    uint32_t timeSinceLastPut = now - _lastPutTime;
+    uint32_t timeSinceLastCommit = now - _lastCommitTime;
+
+    // Calculate the prediction window (when it's 'safe' to write)
+    float dynamicWindow = _predictWindow * (1.0f + _heat * 0.2f);
+
+    if (timeSinceLastPut >= dynamicWindow && timeSinceLastCommit >= _adaptiveInterval)
+        commit();
+}
+
+bool NeuNVS::commit()
+{
+    if (!_isValid || !_handle || !_isDirty)
+        return !_isDirty;
+
+    uint32_t now = safeMillis();
+    if (now < _lockdownUntil)
+        return false;
+
+    uint32_t delta = now - _lastCommitTime;
+
+    // 1. ADAPTIVE HEAT PENALTY
+    if (delta < _interval)
+    {
+        float penalty = (float)(_interval - delta) / _interval;
+        // _heat += penalty * 1.5f; // Increase to 1.5 to be more firm against looping
+        _heat += penalty * 0.8f;
+    }
+    else
+        _heat *= 0.80f; // Cooling is faster if the user is orderly
+
+    if (_heat > _maxHeat)
+        _heat = _maxHeat;
+
+    // 2. LOCKDOWN CHECK (Threshold aggressive 6.0)
+    if (_heat >= 6.0f)
+    {
+        _lockdownUntil = now + _lockdownDuration;
+        triggerError(ERR_LOCKDOWN, 0);
+        // Serial.printf("!!! NeuNVS PROTECT: Lockdown %lu ms (Heat: %.2f) !!!\n", _lockdownDuration, _heat);
+        return false;
+    }
+
+    // 3. ADAPTIVE INTERVAL CALCULATION
+    // _adaptiveInterval = _interval + (uint32_t)(_heat * 500.0f);
+    _adaptiveInterval = _interval + (uint32_t)(_heat * 100.0f);
+    _adaptiveInterval = constrain(_adaptiveInterval, _interval, _maxInterval);
+
+    // 4. EXECUTION
+    if (nvs_commit(_handle) == ESP_OK)
+    {
+        _lastCommitTime = now;
+        _isDirty = false;
+        // Serial.printf("Commit OK | Heat: %.2f | Next: %lu ms\n", _heat, _adaptiveInterval);
+        return true;
+    }
+
+    _heat += 2.0f; // Extra penalty if hardware fails to respond
+    return false;
+}
+
 bool NeuNVS::remove(uint8_t id)
 {
-    if (!_isValid || safeMillis() < _lockdownUntil || !_handle)
+    if (!_isValid || !_handle || id >= NeuNVSConstants::MAX_IDS)
+        return false;
+
+    if (safeMillis() < _lockdownUntil)
         return false;
 
     char key[NeuNVSConstants::MAX_KEY_LEN];
@@ -191,6 +227,7 @@ bool NeuNVS::remove(uint8_t id)
 
     if (nvs_erase_key(_handle, key) == ESP_OK)
     {
+        _xorCache[id] = 0; // Clear cache to sync
         _isDirty = true;
         return true;
     }
@@ -199,14 +236,29 @@ bool NeuNVS::remove(uint8_t id)
 
 bool NeuNVS::clearAll()
 {
-    if (!_isValid || safeMillis() < _lockdownUntil || !_handle)
+    // 1. Check validity & Lockdown
+    if (!_isValid || !_handle || safeMillis() < _lockdownUntil)
         return false;
 
+    // 2. Execute erase in NVS
     if (nvs_erase_all(_handle) == ESP_OK)
     {
-        _isDirty = true;
-        return commit();
+        // 3. IMPORTANT: Reset RAM Cache
+        // So that subsequent put()s don't assume the data is still there (false positives are identical)
+        memset(_xorCache, 0, sizeof(_xorCache));
+
+        // 4. Reset internal state
+        _isDirty = false; // nvs_erase_all usually automatically commits, but nvs_commit is still recommended
+
+        // According to your code logic: call commit to finalize
+        if (nvs_commit(_handle) == ESP_OK)
+        {
+            _heat *= 0.5f; // Gives a cooling bonus because memory is now free
+            return true;
+        }
     }
+
+    triggerError(ERR_WRITE_FAILED, 0);
     return false;
 }
 
@@ -225,15 +277,33 @@ bool NeuNVS::exists(uint8_t id)
 
 void NeuNVS::putString(uint8_t id, const String &value)
 {
-    if (!_isValid || safeMillis() < _lockdownUntil || !_handle)
+    if (!_isValid || !_handle || id >= NeuNVSConstants::MAX_IDS)
         return;
 
+    size_t dataLen = value.length();
+    uint16_t newXor = calculateXOR((const uint8_t *)value.c_str(), dataLen);
+
+    // 1. DIRTY CHECK (Fast via RAM)
+    if (_xorCache[id] == newXor)
+        return;
+
+    // 2. LOCKDOWN PROTECTION
+    uint32_t now = safeMillis();
+    if (now < _lockdownUntil)
+        return;
+
+    // 3. UPDATE HEAT
+    uint32_t dt = now - _lastPutTime;
+    _heat += (dt < 500) ? (1.0f - (float)dt / 500.0f) * 0.5f : 0;
+    if (_heat > _maxHeat)
+        _heat = _maxHeat;
+    _lastPutTime = now;
+
+    // 4. PREPARE DATA
     char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
-    size_t dataLen = value.length();
     size_t totalSize = sizeof(DataHeader) + dataLen;
-
     uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_STRING];
     uint8_t *buffer = (totalSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(totalSize);
 
@@ -243,14 +313,16 @@ void NeuNVS::putString(uint8_t id, const String &value)
         return;
     }
 
-    DataHeader header = {calculateXOR((uint8_t *)value.c_str(), dataLen), (uint16_t)dataLen};
+    // Arrange the Header complete with Magic Bytes
+    DataHeader header = {newXor, (uint16_t)dataLen, 0xA5, 1, 0};
     memcpy(buffer, &header, sizeof(DataHeader));
     memcpy(buffer + sizeof(DataHeader), value.c_str(), dataLen);
 
-    if (!isDataIdentical(id, buffer, totalSize))
+    // 5. WRITE TO NVS
+    if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
     {
-        if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
-            _isDirty = true;
+        _isDirty = true;
+        _xorCache[id] = newXor; // Update cache RAM
     }
 
     if (buffer != stackBuf)
@@ -275,22 +347,13 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
         return false;
     }
 
-    // Hybrid Stack for reading
     uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_STRING];
     uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
 
-    if (!buffer)
+    if (!buffer || nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
     {
-        triggerError(ERR_ALLOC_FAILED, id);
-        outValue = defaultValue;
-        return false;
-    }
-
-    if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
-    {
-        if (buffer != stackBuf)
+        if (buffer && buffer != stackBuf)
             free(buffer);
-
         outValue = defaultValue;
         return false;
     }
@@ -298,26 +361,32 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
     DataHeader header;
     memcpy(&header, buffer, sizeof(DataHeader));
 
-    uint8_t *dataPtr = buffer + sizeof(DataHeader);
-    uint16_t computedXOR = calculateXOR(dataPtr, header.dataSize);
-
-    if (header.dataSize != (storedSize - sizeof(DataHeader)) || header.xorSum != computedXOR)
+    // VALIDASI MAGIC BYTE
+    if (header.magic != 0xA5)
     {
-        triggerError(header.xorSum != computedXOR ? ERR_DATA_CORRUPT : ERR_SIZE_MISMATCH, id);
-
+        triggerError(ERR_DATA_CORRUPT, id);
         if (buffer != stackBuf)
             free(buffer);
-
         outValue = defaultValue;
         return false;
     }
 
-    // Use efficient String constructor with data length
+    uint8_t *dataPtr = buffer + sizeof(DataHeader);
+    uint16_t computedXOR = calculateXOR(dataPtr, header.dataSize);
+
+    if (header.xorChecksum != computedXOR)
+    {
+        triggerError(ERR_DATA_CORRUPT, id);
+        if (buffer != stackBuf)
+            free(buffer);
+        outValue = defaultValue;
+        return false;
+    }
+
     outValue = String((const char *)dataPtr, header.dataSize);
 
     if (buffer != stackBuf)
         free(buffer);
-
     return true;
 }
 
@@ -348,45 +417,62 @@ void NeuNVS::dump(uint8_t id, size_t byteInLen)
         return;
     }
 
-    nvs_get_blob(_handle, key, buffer, &storedSize);
+    if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
+    {
+        Serial.println(F("NeuNVS: Dump read failed!"));
+        if (buffer != stackBuf)
+            free(buffer);
+        return;
+    }
 
-    Serial.printf("\n--- NeuNVS Dump ID: %u (%u bytes) ---\n", id, (uint32_t)storedSize);
+    Serial.printf("\n=== NeuNVS Dump ID: %u (%u bytes) ===\n", id, (uint32_t)storedSize);
 
     if (storedSize >= sizeof(DataHeader))
     {
         DataHeader header;
         memcpy(&header, buffer, sizeof(DataHeader));
-        Serial.printf("Header -> XOR: 0x%02X, DataSize: %u\n", header.xorSum, header.dataSize);
 
-        size_t dataLen = storedSize - sizeof(DataHeader);
+        // Show Full Header info
+        Serial.printf("Header -> Magic: 0x%02X | Ver: %u | XOR: 0x%04X | Size: %u\n",
+                      header.magic, header.version, header.xorChecksum, header.dataSize);
+
+        if (header.magic != 0xA5)
+            Serial.println(F("WARNING: Magic Byte mismatch! Data might be corrupt."));
+
+        size_t dataLen = (storedSize > sizeof(DataHeader)) ? (storedSize - sizeof(DataHeader)) : 0;
         uint8_t *dataPtr = buffer + sizeof(DataHeader);
 
-        for (size_t i = 0; i < dataLen; i += byteInLen)
+        if (dataLen > 0)
         {
-            // Print Hex
-            Serial.print("Hex  : ");
-            for (size_t j = 0; j < byteInLen; j++)
+            for (size_t i = 0; i < dataLen; i += byteInLen)
             {
-                if (i + j < dataLen)
-                    Serial.printf("%02X ", dataPtr[i + j]);
-                else
-                    Serial.print("  ");
-            }
-
-            // Print ASCII
-            Serial.print(" | ");
-            for (size_t j = 0; j < byteInLen; j++)
-            {
-                if (i + j < dataLen)
+                Serial.printf("[%04u] ", i);
+                // Print Hex
+                for (size_t j = 0; j < byteInLen; j++)
                 {
-                    uint8_t b = dataPtr[i + j];
-                    Serial.print((b >= 32 && b <= 126) ? (char)b : '.');
+                    if (i + j < dataLen)
+                        Serial.printf("%02X ", dataPtr[i + j]);
+                    else
+                        Serial.print("   ");
                 }
+
+                Serial.print("| ");
+                // Print ASCII
+                for (size_t j = 0; j < byteInLen; j++)
+                {
+                    if (i + j < dataLen)
+                    {
+                        uint8_t b = dataPtr[i + j];
+                        Serial.print((b >= 32 && b <= 126) ? (char)b : '.');
+                    }
+                }
+                Serial.println();
             }
-            Serial.println();
         }
+        else
+            Serial.println(F("Body   -> (Empty)"));
     }
-    Serial.println(F("-------------------------------------------"));
+    Serial.println(F("==========================================="));
 
     if (buffer != stackBuf)
         free(buffer);
@@ -398,14 +484,11 @@ size_t NeuNVS::getTotalFreeEntries()
         return 0;
 
     nvs_stats_t stats;
-    esp_err_t err = nvs_get_stats(NULL, &stats);
-    if (err == ESP_OK)
+    // Use NULL to get total nvs partition statistics
+    if (nvs_get_stats(NULL, &stats) == ESP_OK)
         return stats.free_entries;
-    else
-    {
-        triggerError(ERR_WRITE_FAILED, 0);
-        return 0;
-    }
+
+    return 0;
 }
 
 #if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_EEPROM)

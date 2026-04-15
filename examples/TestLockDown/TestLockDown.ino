@@ -44,8 +44,7 @@ void setup()
     delay(1000);
     Serial.println("\n--- Testing NeuNVS ---");
 
-    // Initialization: Commit interval 2 seconds, Lockdown 10 seconds
-    if (storage.begin(2000, 10))
+    if (storage.begin())
         Serial.println("NVS Initialized!");
     else
         Serial.println("NVS Failed!");

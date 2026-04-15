@@ -1,10 +1,11 @@
 # NeuNVS
 
-**Ultra-Fast, Secure, and Hardware-Protected NVS Wrapper for ESP32**
+**High-Performance & Hardware-Protected NVS Library for ESP32**
 
-NeuNVS is a next-generation storage library for ESP32, designed as a high-performance alternative to the standard `Preferences` and `EEPROM` libraries.
+The Smartest, Fastest, and Safest Hardware-Protected Storage for the ESP32.
+NeuNVS is a next-generation storage library for the ESP32 designed as a high-performance alternative to `Preferences` and `EEPROM`.
 
-It focuses on extreme performance, data integrity, and physical hardware protection with **XOR checksum** and **auto-lockdown mechanism**.
+This library not only stores data but also actively protects your hardware using an intelligent Virtual Heat Meter algorithm that works like a CPU's thermal protection system to maintain the longevity of your Flash memory.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: ESP32](https://img.shields.io/badge/Platform-ESP32-blue?logo=espressif&logoColor=white)](https://espressif.com)
@@ -15,42 +16,39 @@ It focuses on extreme performance, data integrity, and physical hardware protect
 
 ## Why NeuNVS?
 
-Standard libraries like `Preferences` often carry heavy overhead due to string-based keys, lack of hardware safety, and **no corruption detection**.
+Standard libraries often neglect hardware health and data integrity.
 
-**NeuNVS** solves this by using:
+**NeuNVS** is designed to fill this gap with four core pillars:
 
-- **ID-based system** (0-255) for ultra-fast access
-- **XOR checksum** on every data block
-- **Auto-lockdown** to prevent flash wear from buggy loops
-- **Dynamic Memory Management** - Minimized Fragmentation (Hybrid Stack/Heap Allocation)
+- **Ultra-Fast ID System** Uses a numeric ID (0-255) instead of a String Key, enabling near-instant memory access by eliminating string-parsing overhead.
 
----
+- **Smart Thermal Throttling** An exclusive "Heat Meter" feature. The library monitors the intensity of data writes and automatically locks down if it detects activity that could jeopardize Flash lifespan (such as a loop bug)
 
-## When to Use Preferences Instead
+- **Data Integrity** Every data block is secured with a Magic Byte and XOR Checksum. Say goodbye to corrupted data and silent failures!
 
-- Very simple projects
-- No need for data integrity or performance
-- Beginner-friendly use cases
+- **Hybrid Memory Management** Minimizes RAM fragmentation using an intelligent allocation strategy (Stack/Heap Hybrid), ensuring stability even in long-running projects.
 
 ---
 
 ## Benchmark Results
 
-Tested on **ESP32-D0WDQ6** (v1.0.1). Results show that NeuNVS significantly outperforms standard libraries by eliminating heap overhead and using optimized memory comparison.
+Tested on **ESP32-D0WDQ6** (v1.0.1).
+Results show that NeuNVS significantly outperforms standard libraries.
 
-| Feature                      | NeuNVS (Ours)    | Standard Preferences | Improvement          |
-| :--------------------------- | :--------------- | :------------------- | :------------------- |
-| **Write Speed (100 ops)**    | **24.4 ms**      | 161.0 ms             | **6.5x Faster**      |
-| **Complex Struct (100 ops)** | **24.9 ms**      | 980.2 ms             | **39.3x Faster!**    |
-| **Dirty Check Skip**         | **136 us**       | 18,435 us            | **135x Faster**      |
-| **RAM Usage**                | **Hybrid Stack** | Heap Allocation      | **Minimized Fragmentation** |
+| Feature                      | NeuNVS (Ours)           | Standard Preferences | Improvement        |
+| :--------------------------- | :---------------------- | :------------------- | :----------------- |
+| **Dirty Check Skip**         | **28 µs**               | 18,435 µs            | **650x Faster!**   |
+| **Complex Struct (100 ops)** | **24.9 ms**             | 980.2 ms             | **39.3x Faster!**  |
+| **Safety System**            | **Adaptive Throttling** | None (Burn Out Risk) | **Hardware Safe**  |
+| **RAM Usage**                | **Hybrid Stack**        | Heap Allocation      | **Minimized Frag** |
 
 > **Note:** "Dirty Check Skip" refers to the time taken to verify that data hasn't changed, preventing unnecessary Flash writes and extending hardware lifespan.
 
 <p align="center">
-  <img src="assets/benchmark_result.png" width="800" alt="NeuNVS Benchmark Log">
+  <img src="assets/benchmark_result_1.png" width="400" alt="Benchmark Log 1">
+  <img src="assets/benchmark_result_2.png" width="400" alt="Benchmark Log 2">
   <br>
-  <em>Real-world benchmark log captured from Serial Monitor (ESP32-D0WDQ6)</em>
+  <em>Real-world benchmark logs captured from Serial Monitor (ESP32-D0WDQ6)</em>
 </p>
 
 ---
@@ -343,7 +341,7 @@ Issues and pull requests are welcome! For major changes, please open an issue fi
 
 ---
 
-### Support the Project
+### Star History
 
 If you find this library useful, please give it a ⭐ on GitHub!
 

@@ -5,7 +5,7 @@ void setup()
     Serial.begin(115200);
     delay(1000); // Wait for Serial to be ready
 
-    // Initialize: default 1s interval, 5s lockdown, max 5 commits
+    // Initialize: default 1s interval, 2s lockdown
     if (!neuNVS.begin())
     {
         Serial.println("NeuNVS Init Failed!");
