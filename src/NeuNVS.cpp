@@ -4,8 +4,9 @@ uint8_t NeuNVS::_instanceCount = 0;
 
 NeuNVS::NeuNVS() : _handle(0), _lastCommitTime(0), _interval(1000),
                    _isDirty(false), _lockdownUntil(0),
-                   _lockdownDuration(5000), _isValid(true), _predictWindow(1000.0f),
-                   _adaptiveInterval(1000), _maxInterval(5000), _maxHeat(10.0f)
+                   _lockdownDuration(5000), _isValid(true),
+                   _adaptiveInterval(1000), _maxInterval(5000), _maxHeat(10.0f),
+                   _predictWindow(1000.0f), _lastPutTime(0), _heat(0.0f)
 {
     // Initialize the cache so that it does not contain junk data
     memset(_xorCache, 0, sizeof(_xorCache));
