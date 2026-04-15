@@ -296,13 +296,13 @@ if (neuNVS.isLocked()) {
 
 ## Migration from Preferences
 
-| Preferences                        | NeuNVS                    |
-| :--------------------------------- | :------------------------ |
-| preferences.putInt("key", 10)      | NeuNVS.put(1, 10)         |
-| preferences.getInt("key", 0)       | NeuNVS.get(1, 0)          |
-| preferences.putString("str", "hi") | NeuNVS.putString(10, "hi")|
-| preferences.getString("str", "")   | neuNVS.getString(10, "")  |
-| preferences.clear()                | NeuNVS.clearAll()         |
+| Preferences                        | NeuNVS                     |
+| :--------------------------------- | :------------------------- |
+| preferences.putInt("key", 10)      | neuNVS.put(1, 10)          |
+| preferences.getInt("key", 0)       | neuNVS.get(1, 0)           |
+| preferences.putString("str", "hi") | neuNVS.putString(10, "hi") |
+| preferences.getString("str", "")   | neuNVS.getString(10, "")   |
+| preferences.clear()                | neuNVS.clearAll()          |
 
 ---
 
