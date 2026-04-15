@@ -13,7 +13,7 @@ namespace NeuNVSConstants
     constexpr size_t STACK_BUFFER_DUMP = 256;
     constexpr size_t MAX_KEY_LEN = 6;
     constexpr size_t MAX_INSTANCES = 254;
-    constexpr size_t MAX_IDS = 32;
+    constexpr size_t MAX_IDS = 255;
 }
 
 #ifdef ESP32
