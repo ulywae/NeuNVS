@@ -394,7 +394,7 @@ size_t NeuNVS::getTotalFreeEntries()
     }
     else
     {
-        triggerError(ERR_WRITE_FAILED, 0); // bisa pakai kode error umum
+        triggerError(ERR_WRITE_FAILED, 0); 
         return 0;
     }
 }
