@@ -45,10 +45,14 @@ Results show that NeuNVS significantly outperforms standard libraries.
 > **Note:** "Dirty Check Skip" refers to the time taken to verify that data hasn't changed, preventing unnecessary Flash writes and extending hardware lifespan.
 
 <p align="center">
-  <img src="assets/benchmark_result_1.png" width="400" alt="Benchmark Log 1">
-  <br>
-  <img src="assets/benchmark_result_2.png" width="400" alt="Benchmark Log 2">
-  <br>
+  <img src="assets/benchmark_result_1.png" width="400">
+</p>
+
+<p align="center">
+  <img src="assets/benchmark_result_2.png" width="400">
+</p>
+
+<p align="center">
   <em>Real-world benchmark logs captured from Serial Monitor (ESP32-D0WDQ6)</em>
 </p>
 
