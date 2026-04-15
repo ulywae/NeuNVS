@@ -46,6 +46,7 @@ Results show that NeuNVS significantly outperforms standard libraries.
 
 <p align="center">
   <img src="assets/benchmark_result_1.png" width="400" alt="Benchmark Log 1">
+  <br>
   <img src="assets/benchmark_result_2.png" width="400" alt="Benchmark Log 2">
   <br>
   <em>Real-world benchmark logs captured from Serial Monitor (ESP32-D0WDQ6)</em>
