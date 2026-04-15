@@ -348,8 +348,7 @@ Issues and pull requests are welcome! For major changes, please open an issue fi
 
 ### Support the Project 
 
-If this project helps you, please consider giving it a ⭐! It helps others find the repository and keeps me motivated to add more features.
-
-[![Star History Chart](https://star-history.com)](https://star-history.com)
+If this project helps you, please consider giving it a ⭐! 
+It helps others find the repository and keeps me motivated to add more features.
 
 ---
