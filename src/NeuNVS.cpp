@@ -178,8 +178,7 @@ bool NeuNVS::commit()
     if (delta < _interval)
     {
         float penalty = (float)(_interval - delta) / _interval;
-        // _heat += penalty * 1.5f; // Increase to 1.5 to be more firm against looping
-        _heat += penalty * 0.8f;
+        _heat += penalty * 0.8f; // Increase to be more firm against looping
     }
     else
         _heat *= 0.80f; // Cooling is faster if the user is orderly
@@ -192,12 +191,10 @@ bool NeuNVS::commit()
     {
         _lockdownUntil = now + _lockdownDuration;
         triggerError(ERR_LOCKDOWN, 0);
-        // Serial.printf("!!! NeuNVS PROTECT: Lockdown %lu ms (Heat: %.2f) !!!\n", _lockdownDuration, _heat);
         return false;
     }
 
     // 3. ADAPTIVE INTERVAL CALCULATION
-    // _adaptiveInterval = _interval + (uint32_t)(_heat * 500.0f);
     _adaptiveInterval = _interval + (uint32_t)(_heat * 100.0f);
     _adaptiveInterval = constrain(_adaptiveInterval, _interval, _maxInterval);
 
@@ -206,7 +203,6 @@ bool NeuNVS::commit()
     {
         _lastCommitTime = now;
         _isDirty = false;
-        // Serial.printf("Commit OK | Heat: %.2f | Next: %lu ms\n", _heat, _adaptiveInterval);
         return true;
     }
 
