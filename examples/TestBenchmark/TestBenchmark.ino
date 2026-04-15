@@ -23,9 +23,6 @@ void setup()
     secureStore.begin(1000, 5, 5);
     prefs.begin("bench", false);
 
-    // Wipe all data first before benchmark
-    secureStore.clearAll();
-
     delay(2000);
     runBenchmark();
 }

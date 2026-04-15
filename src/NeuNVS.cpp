@@ -6,7 +6,7 @@ NeuNVS::NeuNVS() : _lastCommitTime(0), _interval(1000), _isDirty(false),
                    _commitCount(0), _lockdownUntil(0),
                    _maxCommits(5), _lockdownDuration(5000), _isValid(true)
 {
-    if (_instanceCount < 254)
+    if (_instanceCount < NeuNVSConstants::MAX_INSTANCES)
     {
         snprintf(_currentNS, sizeof(_currentNS), "ns%u", _instanceCount);
         _instanceCount++;
@@ -52,13 +52,13 @@ void NeuNVS::end()
         commit();
         nvs_close(_handle);
         _handle = 0;
-        _isValid = false;
     }
+    _isValid = false;
 }
 
 void NeuNVS::get_key(uint8_t id, char *keyOut)
 {
-    snprintf(keyOut, 6, "id%u", id);
+    snprintf(keyOut, NeuNVSConstants::MAX_KEY_LEN, "id%u", id);
 }
 
 uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
@@ -71,7 +71,7 @@ uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
 
 bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
 {
-    char key[6];
+    char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
     size_t existingSize = 0;
@@ -81,9 +81,9 @@ bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
         return false;
 
     // --- OPTIMIZATION START ---
-    // Use a stack buffer for data <= 64 bytes (covers almost all PODs & small structs)
+    // Use a stack buffer for data <= STACK_BUFFER_POD bytes (covers almost all PODs & small structs)
     // This eliminates 'malloc' and 'free' which consume CPU & Heap cycles
-    uint8_t stackBuffer[64];
+    uint8_t stackBuffer[NeuNVSConstants::STACK_BUFFER_POD];
     uint8_t *existingData = nullptr;
 
     if (existingSize <= sizeof(stackBuffer))
@@ -98,7 +98,15 @@ bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
         }
     }
 
-    nvs_get_blob(_handle, key, existingData, &existingSize);
+    esp_err_t err = nvs_get_blob(_handle, key, existingData, &existingSize);
+    if (err != ESP_OK)
+    {
+        triggerError(ERR_READ_FAILED, id);
+        if (existingData != stackBuffer)
+            free(existingData);
+        return false;
+    }
+
     bool identical = (memcmp(existingData, newData, newSize) == 0);
 
     // Only free if you use malloc
@@ -122,20 +130,21 @@ void NeuNVS::triggerError(uint8_t code, uint8_t id)
 
 void NeuNVS::update()
 {
-    if (!_isValid || !_isDirty || millis() < _lockdownUntil)
+    if (!_isValid || !_isDirty || safeMillis() < _lockdownUntil || !_handle)
         return;
-    if (millis() - _lastCommitTime >= _interval)
+    if (safeMillis() - _lastCommitTime >= _interval)
         commit();
 }
 
 bool NeuNVS::commit()
 {
-    if (!_isValid)
+    if (!_isValid || !_handle)
         return false;
+
     if (!_isDirty)
         return true;
 
-    uint32_t now = millis();
+    uint32_t now = safeMillis();
     if (now < _lockdownUntil)
     {
         triggerError(ERR_LOCKDOWN, 0);
@@ -154,9 +163,7 @@ bool NeuNVS::commit()
         }
     }
     else
-    {
         _commitCount = 0;
-    }
 
     if (nvs_commit(_handle) != ESP_OK)
     {
@@ -171,14 +178,15 @@ bool NeuNVS::commit()
 
 bool NeuNVS::isLocked()
 {
-    return (millis() < _lockdownUntil);
+    return (safeMillis() < _lockdownUntil);
 }
 
 bool NeuNVS::remove(uint8_t id)
 {
-    if (!_isValid || millis() < _lockdownUntil)
+    if (!_isValid || safeMillis() < _lockdownUntil || !_handle)
         return false;
-    char key[6];
+
+    char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
     if (nvs_erase_key(_handle, key) == ESP_OK)
@@ -191,8 +199,9 @@ bool NeuNVS::remove(uint8_t id)
 
 bool NeuNVS::clearAll()
 {
-    if (!_isValid || millis() < _lockdownUntil)
+    if (!_isValid || safeMillis() < _lockdownUntil || !_handle)
         return false;
+
     if (nvs_erase_all(_handle) == ESP_OK)
     {
         _isDirty = true;
@@ -203,9 +212,10 @@ bool NeuNVS::clearAll()
 
 bool NeuNVS::exists(uint8_t id)
 {
-    if (!_isValid)
+    if (!_isValid || !_handle)
         return false;
-    char key[6];
+
+    char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
     size_t size = 0;
@@ -215,17 +225,16 @@ bool NeuNVS::exists(uint8_t id)
 
 void NeuNVS::putString(uint8_t id, const String &value)
 {
-    if (!_isValid || millis() < _lockdownUntil)
+    if (!_isValid || safeMillis() < _lockdownUntil || !_handle)
         return;
 
-    char key[6];
+    char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
     size_t dataLen = value.length();
     size_t totalSize = sizeof(DataHeader) + dataLen;
 
-    // Use 128 byte stack buffer for short strings
-    uint8_t stackBuf[128];
+    uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_STRING];
     uint8_t *buffer = (totalSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(totalSize);
 
     if (!buffer)
@@ -250,13 +259,13 @@ void NeuNVS::putString(uint8_t id, const String &value)
 
 bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
 {
-    if (!_isValid)
+    if (!_isValid || !_handle)
     {
         outValue = defaultValue;
         return false;
     }
 
-    char key[6];
+    char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
     size_t storedSize = 0;
@@ -266,8 +275,8 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
         return false;
     }
 
-    // Hybrid Stack untuk pembacaan
-    uint8_t stackBuf[128];
+    // Hybrid Stack for reading
+    uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_STRING];
     uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
 
     if (!buffer)
@@ -295,14 +304,16 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
     if (header.dataSize != (storedSize - sizeof(DataHeader)) || header.xorSum != computedXOR)
     {
         triggerError(header.xorSum != computedXOR ? ERR_DATA_CORRUPT : ERR_SIZE_MISMATCH, id);
+
         if (buffer != stackBuf)
             free(buffer);
+
         outValue = defaultValue;
         return false;
     }
 
     // Use efficient String constructor with data length
-    outValue = String((const char *)dataPtr).substring(0, header.dataSize);
+    outValue = String((const char *)dataPtr, header.dataSize);
 
     if (buffer != stackBuf)
         free(buffer);
@@ -310,15 +321,15 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
     return true;
 }
 
-void NeuNVS::dump(uint8_t id)
+void NeuNVS::dump(uint8_t id, size_t byteInLen)
 {
-    if (!_isValid)
+    if (!_isValid || !_handle)
     {
         Serial.println(F("NeuNVS: Instance invalid!"));
         return;
     }
 
-    char key[6];
+    char key[NeuNVSConstants::MAX_KEY_LEN];
     get_key(id, key);
 
     size_t storedSize = 0;
@@ -328,7 +339,7 @@ void NeuNVS::dump(uint8_t id)
         return;
     }
 
-    uint8_t stackBuf[256];
+    uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_DUMP];
     uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
 
     if (!buffer)
@@ -350,21 +361,21 @@ void NeuNVS::dump(uint8_t id)
         size_t dataLen = storedSize - sizeof(DataHeader);
         uint8_t *dataPtr = buffer + sizeof(DataHeader);
 
-        for (size_t i = 0; i < dataLen; i += 16)
+        for (size_t i = 0; i < dataLen; i += byteInLen)
         {
             // Print Hex
             Serial.print("Hex  : ");
-            for (size_t j = 0; j < 16; j++)
+            for (size_t j = 0; j < byteInLen; j++)
             {
                 if (i + j < dataLen)
                     Serial.printf("%02X ", dataPtr[i + j]);
                 else
-                    Serial.print("   "); // Padding if the last row is not even 16 bytes
+                    Serial.print("  ");
             }
 
             // Print ASCII
             Serial.print(" | ");
-            for (size_t j = 0; j < 16; j++)
+            for (size_t j = 0; j < byteInLen; j++)
             {
                 if (i + j < dataLen)
                 {
@@ -389,12 +400,10 @@ size_t NeuNVS::getTotalFreeEntries()
     nvs_stats_t stats;
     esp_err_t err = nvs_get_stats(NULL, &stats);
     if (err == ESP_OK)
-    {
         return stats.free_entries;
-    }
     else
     {
-        triggerError(ERR_WRITE_FAILED, 0); 
+        triggerError(ERR_WRITE_FAILED, 0);
         return 0;
     }
 }

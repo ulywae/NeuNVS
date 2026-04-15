@@ -220,11 +220,12 @@ if (neuNVS.isLocked()) {
 | 0    | `ERR_NONE`             | Operation successful.                              |
 | 1    | `ERR_LOCKDOWN`         | Abuse protection active! Too many writes detected. |
 | 2    | `ERR_WRITE_FAILED`     | Flash write operation failed at NVS level.         |
-| 3    | `ERR_ID_NOT_FOUND`     | Requested ID doesn't exist.                        |
-| 4    | `ERR_DATA_CORRUPT`     | XOR checksum mismatch (Data is corrupted!).        |
-| 5    | `ERR_SIZE_MISMATCH`    | Data size doesn't match the stored value.          |
-| 6    | `ERR_INSTANCE_INVALID` | Instance limit reached (Max 254).                  |
-| 7    | `ERR_ALLOC_FAILED`     | Out of RAM (Heap) while processing data.           |
+| 3    | `ERR_READ_FAILED`      | Failed to read data from flash memory.             |
+| 4    | `ERR_ID_NOT_FOUND`     | Requested ID doesn't exist.                        |
+| 5    | `ERR_DATA_CORRUPT`     | XOR checksum mismatch (Data is corrupted!).        |
+| 6    | `ERR_SIZE_MISMATCH`    | Data size doesn't match the stored value.          |
+| 7    | `ERR_INSTANCE_INVALID` | Instance not valid (Max 254).                      |
+| 8    | `ERR_ALLOC_FAILED`     | Out of RAM (Heap) while processing data.           |
 
 ---
 

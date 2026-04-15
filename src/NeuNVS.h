@@ -6,6 +6,22 @@
 #include <type_traits>
 #include <Arduino.h>
 
+namespace NeuNVSConstants
+{
+    constexpr size_t STACK_BUFFER_POD = 64;
+    constexpr size_t STACK_BUFFER_STRING = 128;
+    constexpr size_t STACK_BUFFER_DUMP = 256;
+    constexpr size_t MAX_KEY_LEN = 6;
+    constexpr size_t MAX_INSTANCES = 254;
+}
+
+#ifdef ESP32
+#include <esp_timer.h>
+inline uint32_t safeMillis() { return (uint32_t)(esp_timer_get_time() / 1000); }
+#else
+inline uint32_t safeMillis() { return millis(); }
+#endif
+
 typedef void (*EEPROMErrorCallback)(uint8_t errorCode, uint8_t id);
 
 class NeuNVS
@@ -43,6 +59,7 @@ public:
         ERR_NONE = 0,
         ERR_LOCKDOWN,
         ERR_WRITE_FAILED,
+        ERR_READ_FAILED,
         ERR_ID_NOT_FOUND,
         ERR_DATA_CORRUPT,
         ERR_SIZE_MISMATCH,
@@ -59,7 +76,7 @@ public:
     bool isLocked();
     bool remove(uint8_t id);
     bool clearAll();
-    void dump(uint8_t id);
+    void dump(uint8_t id, size_t byteInLen = 16);
     bool exists(uint8_t id);
     size_t getTotalFreeEntries();
     void onError(EEPROMErrorCallback callback);
@@ -76,16 +93,16 @@ public:
         static_assert(std::is_standard_layout<T>::value && std::is_trivial<T>::value,
                       "Data type is too complex for put()! Use putString for String.");
 
-        if (millis() < _lockdownUntil || !_isValid)
+        if (safeMillis() < _lockdownUntil || !_isValid || !_handle)
             return;
 
-        char key[6];
+        char key[NeuNVSConstants::MAX_KEY_LEN];
         get_key(id, key);
 
         size_t totalSize = sizeof(DataHeader) + sizeof(T);
 
         // --- Hybrid Stack/Heap Allocation ---
-        uint8_t stackBuf[64];
+        uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_POD];
         uint8_t *buffer = (totalSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(totalSize);
 
         if (!buffer)
@@ -114,13 +131,13 @@ public:
         static_assert(std::is_standard_layout<T>::value && std::is_trivial<T>::value,
                       "Data type is too complex for get()! Use getString for String.");
 
-        if (!_isValid)
+        if (!_isValid || !_handle)
         {
             outValue = defaultValue;
             return false;
         }
 
-        char key[6];
+        char key[NeuNVSConstants::MAX_KEY_LEN];
         get_key(id, key);
 
         size_t storedSize = 0;
@@ -138,7 +155,7 @@ public:
         }
 
         // --- Hybrid Stack/Heap Allocation ---
-        uint8_t stackBuf[64];
+        uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_POD];
         uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
 
         if (!buffer)
@@ -152,6 +169,7 @@ public:
         {
             if (buffer != stackBuf)
                 free(buffer);
+
             outValue = defaultValue;
             return false;
         }
@@ -171,6 +189,7 @@ public:
 
         if (buffer != stackBuf)
             free(buffer);
+
         return success;
     }
 };
