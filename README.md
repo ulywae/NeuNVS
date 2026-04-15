@@ -2,7 +2,8 @@
 
 **Ultra-Fast, Secure, and Hardware-Protected NVS Wrapper for ESP32**
 
-NeuNVS is a next-generation storage library for ESP32, designed to replace the standard `Preferences` and `EEPROM` libraries.
+NeuNVS is a next-generation storage library for ESP32, designed as a high-performance alternative to the standard `Preferences` and `EEPROM` libraries.
+
 It focuses on extreme performance, data integrity, and physical hardware protection with **XOR checksum** and **auto-lockdown mechanism**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -21,7 +22,7 @@ Standard libraries like `Preferences` often carry heavy overhead due to string-b
 - **ID-based system** (0-255) for ultra-fast access
 - **XOR checksum** on every data block
 - **Auto-lockdown** to prevent flash wear from buggy loops
-- **Dynamic Memory Management** - no fragmentation!
+- **Dynamic Memory Management** - Minimized Fragmentation (Hybrid Stack/Heap Allocation)
 
 ---
 
@@ -34,12 +35,12 @@ Tested on **ESP32-D0WDQ6** (v1.0.1). Results show that NeuNVS significantly outp
 | **Write Speed (100 ops)**    | **24.4 ms**      | 161.0 ms             | **6.5x Faster**      |
 | **Complex Struct (100 ops)** | **24.9 ms**      | 980.2 ms             | **39.3x Faster!**    |
 | **Dirty Check Skip**         | **136 us**       | 18,435 us            | **135x Faster**      |
-| **RAM Usage**                | **Hybrid Stack** | Heap Allocation      | **No Fragmentation** |
+| **RAM Usage**                | **Hybrid Stack** | Heap Allocation      | **Minimized Fragmentation** |
 
 > **Note:** "Dirty Check Skip" refers to the time taken to verify that data hasn't changed, preventing unnecessary Flash writes and extending hardware lifespan.
 
 <p align="center">
-  <img src="assets/benchmark_result.png" width="800" alt="NeuNVS Benchmark Log">
+  <img src="assets/benchmark_rult.png" width="800" alt="NeuNVS Benchmark Log">
   <br>
   <em>Real-world benchmark log captured from Serial Monitor (ESP32-D0WDQ6)</em>
 </p>
@@ -336,6 +337,6 @@ Issues and pull requests are welcome! For major changes, please open an issue fi
 
 ### Star History
 
-If you find this library useful, please give it a on GitHub!
+If you find this library useful, please give it a ⭐ on GitHub!
 
 ---
