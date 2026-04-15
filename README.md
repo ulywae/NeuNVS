@@ -300,7 +300,8 @@ if (neuNVS.isLocked()) {
 | :--------------------------------- | :------------------------ |
 | preferences.putInt("key", 10)      | NeuNVS.put(1, 10)         |
 | preferences.getInt("key", 0)       | NeuNVS.get(1, 0)          |
-| preferences.putString("str", "hi") | NeuNVS.putString(1, "hi") |
+| preferences.putString("str", "hi") | NeuNVS.putString(10, "hi")|
+| preferences.getString("str", "")   | neuNVS.getString(10, "")  |
 | preferences.clear()                | NeuNVS.clearAll()         |
 
 ---
