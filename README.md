@@ -343,7 +343,7 @@ Issues and pull requests are welcome! For major changes, please open an issue fi
 
 ---
 
-### Star History
+### Support the Project
 
 If you find this library useful, please give it a ⭐ on GitHub!
 
