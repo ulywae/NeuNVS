@@ -57,16 +57,9 @@ Tested on ESP32-D0WDQ6 (Higher is better for speed, lower for latency):
 
 ### Arduino IDE
 
-Method 1: Library Manager (Recommended)
-
-1. Go to Sketch → Include Library → Manage Libraries...
-2. Type "NeuNVS" in the search bar.
-3. Click Install on the latest version.
-
-Method 2: Manual Installation
-1. Download this repository as a .zip file.
-2. Go to Sketch → Include Library → Add .ZIP Library...
-3. Select the downloaded file from your computer.
+1. Download this repository as a `.zip`
+2. Go to **Sketch** → **Include Library** → **Add .ZIP Library**
+3. Select the downloaded file
 
 ### PlatformIO
 
@@ -84,37 +77,50 @@ lib_deps =
 ```cpp
 #include <NeuNVS.h>
 
+// 1. Define your data structure (Must be POD/Plain Old Data)
+struct UserSettings {
+    float targetTemp;
+    bool alarmEnabled;
+    uint16_t sensorId;
+};
+
 void setup() {
     Serial.begin(115200);
 
-    // Initialize with 1s auto-commit interval, 5s lockdown duration, max 5 commits before lockdown
+    // Initialize with 1s auto-commit interval, 5s lockdown duration, max 5 commits
     if (!neuNVS.begin(1000, 5, 5)) {
         Serial.println("Failed to initialize NeuNVS!");
         return;
     }
 
-    // Write data (ID-based, no strings needed!)
+    // --- Basic Types ---
     uint32_t myData = 1337;
-    neuNVS.put(1, myData);
+    neuNVS.put(1, myData); // Write ID 1
 
-    // Read data safely with XOR validation
     uint32_t savedData;
     if (neuNVS.get(1, savedData)) {
         Serial.printf("Saved Data: %u\n", savedData);
     }
 
-    else {
-        Serial.println("uint32_t data failed to read!");
+    // --- Complex Structs ---
+    UserSettings mySettings = {24.5, true, 404};
+    neuNVS.put(2, mySettings); // Write ID 2
+
+    UserSettings loadedSettings;
+    if (neuNVS.get(2, loadedSettings)) {
+        Serial.printf("Temp: %.1f, Alarm: %s\n",
+                      loadedSettings.targetTemp,
+                      loadedSettings.alarmEnabled ? "ON" : "OFF");
     }
 
-    // String with XOR protection
+    // --- Strings with XOR protection ---
     neuNVS.putString(10, "Hello NeuNVS!");
     String str = neuNVS.getString(10);
     Serial.println(str);
 }
 
 void loop() {
-    // Call update() to process auto-commits safely
+    // MUST be called to process auto-commits and monitor hardware safety
     neuNVS.update();
 }
 ```
@@ -177,6 +183,14 @@ void setup() {
     userStorage.putString(1, "Alice"); // Username
 }
 ```
+
+> [!IMPORTANT]
+>
+> ### ID Scope & Range
+>
+> - **ID Range:** You can use IDs from **0 to 255**.
+> - **Isolated Scope:** This ID range is **local per-instance**.
+> - **Example:** You can store data under `ID 1` in `configStorage` and different data under `ID 1` in `userStorage`. They won't overwrite each other because they're automatically stored in different namespaces (`ns0`, `ns1`, etc.).
 
 ### Check Lockdown Status
 
