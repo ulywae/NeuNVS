@@ -27,6 +27,10 @@ void setup()
     runBenchmark();
 }
 
+/**
+  * Note: Preferences internally handles commits differently depending on usage. 
+  * This benchmark reflects typical usage patterns in Arduino-based applications.
+  */
 void runBenchmark()
 {
     uint32_t start, end;
