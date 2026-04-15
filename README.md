@@ -27,13 +27,22 @@ Standard libraries like `Preferences` often carry heavy overhead due to string-b
 
 ## Benchmark Results
 
-Tested on ESP32-D0WDQ6 (Higher is better for speed, lower for latency):
+Tested on **ESP32-D0WDQ6** (v1.0.1). Results show that NeuNVS significantly outperforms standard libraries by eliminating heap overhead and using optimized memory comparison.
 
-| Feature                   | NeuNVS (Ours)  | Standard Preferences | Improvement          |
-| :------------------------ | :------------- | :------------------- | :------------------- |
-| **Write Speed (100 ops)** | **24.4 ms**    | 161.0 ms             | **6.5x Faster**      |
-| **Dirty Check Skip**      | **127 us**     | 18,518 us            | **145x Faster**      |
-| **RAM Usage**             | **Stack Only** | Heap Allocation      | **No Fragmentation** |
+| Feature                      | NeuNVS (Ours)    | Standard Preferences | Improvement          |
+| :--------------------------- | :--------------- | :------------------- | :------------------- |
+| **Write Speed (100 ops)**    | **24.4 ms**      | 161.0 ms             | **6.5x Faster**      |
+| **Complex Struct (100 ops)** | **24.9 ms**      | 980.2 ms             | **39.3x Faster!**    |
+| **Dirty Check Skip**         | **136 us**       | 18,435 us            | **135x Faster**      |
+| **RAM Usage**                | **Hybrid Stack** | Heap Allocation      | **No Fragmentation** |
+
+> **Note:** "Dirty Check Skip" refers to the time taken to verify that data hasn't changed, preventing unnecessary Flash writes and extending hardware lifespan.
+
+<p align="center">
+  <img src="assets/benchmark_result.jpg" width="800" alt="NeuNVS Benchmark Log">
+  <br>
+  <em>Real-world benchmark log captured from Serial Monitor (ESP32-D0WDQ6)</em>
+</p>
 
 ---
 

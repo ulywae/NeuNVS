@@ -80,16 +80,32 @@ bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
     if (existingSize != newSize)
         return false;
 
-    uint8_t *existingData = (uint8_t *)malloc(existingSize);
-    if (!existingData)
+    // --- OPTIMIZATION START ---
+    // Use a stack buffer for data <= 64 bytes (covers almost all PODs & small structs)
+    // This eliminates 'malloc' and 'free' which consume CPU & Heap cycles
+    uint8_t stackBuffer[64];
+    uint8_t *existingData = nullptr;
+
+    if (existingSize <= sizeof(stackBuffer))
+        existingData = stackBuffer;
+    else
     {
-        triggerError(ERR_ALLOC_FAILED, id);
-        return false;
+        existingData = (uint8_t *)malloc(existingSize);
+        if (!existingData)
+        {
+            triggerError(ERR_ALLOC_FAILED, id);
+            return false;
+        }
     }
 
     nvs_get_blob(_handle, key, existingData, &existingSize);
     bool identical = (memcmp(existingData, newData, newSize) == 0);
-    free(existingData);
+
+    // Only free if you use malloc
+    if (existingData != stackBuffer)
+        free(existingData);
+    // --- END OPTIMIZATION ---
+
     return identical;
 }
 
@@ -201,12 +217,17 @@ void NeuNVS::putString(uint8_t id, const String &value)
 {
     if (!_isValid || millis() < _lockdownUntil)
         return;
+
     char key[6];
     get_key(id, key);
 
     size_t dataLen = value.length();
     size_t totalSize = sizeof(DataHeader) + dataLen;
-    uint8_t *buffer = (uint8_t *)malloc(totalSize);
+
+    // Use 128 byte stack buffer for short strings
+    uint8_t stackBuf[128];
+    uint8_t *buffer = (totalSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(totalSize);
+
     if (!buffer)
     {
         triggerError(ERR_ALLOC_FAILED, id);
@@ -222,7 +243,9 @@ void NeuNVS::putString(uint8_t id, const String &value)
         if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
             _isDirty = true;
     }
-    free(buffer);
+
+    if (buffer != stackBuf)
+        free(buffer);
 }
 
 bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
@@ -232,22 +255,21 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
         outValue = defaultValue;
         return false;
     }
+
     char key[6];
     get_key(id, key);
 
     size_t storedSize = 0;
-    if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK)
-    {
-        outValue = defaultValue;
-        return false;
-    }
-    if (storedSize < sizeof(DataHeader))
+    if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK || storedSize < sizeof(DataHeader))
     {
         outValue = defaultValue;
         return false;
     }
 
-    uint8_t *buffer = (uint8_t *)malloc(storedSize);
+    // Hybrid Stack untuk pembacaan
+    uint8_t stackBuf[128];
+    uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
+
     if (!buffer)
     {
         triggerError(ERR_ALLOC_FAILED, id);
@@ -257,30 +279,34 @@ bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
 
     if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
     {
-        free(buffer);
+        if (buffer != stackBuf)
+            free(buffer);
+
         outValue = defaultValue;
         return false;
     }
 
     DataHeader header;
     memcpy(&header, buffer, sizeof(DataHeader));
-    if (header.dataSize != storedSize - sizeof(DataHeader))
+
+    uint8_t *dataPtr = buffer + sizeof(DataHeader);
+    uint16_t computedXOR = calculateXOR(dataPtr, header.dataSize);
+
+    if (header.dataSize != (storedSize - sizeof(DataHeader)) || header.xorSum != computedXOR)
     {
-        triggerError(ERR_SIZE_MISMATCH, id);
-        free(buffer);
-        outValue = defaultValue;
-        return false;
-    }
-    if (header.xorSum != calculateXOR(buffer + sizeof(DataHeader), header.dataSize))
-    {
-        triggerError(ERR_DATA_CORRUPT, id);
-        free(buffer);
+        triggerError(header.xorSum != computedXOR ? ERR_DATA_CORRUPT : ERR_SIZE_MISMATCH, id);
+        if (buffer != stackBuf)
+            free(buffer);
         outValue = defaultValue;
         return false;
     }
 
-    outValue = String((char *)(buffer + sizeof(DataHeader)), header.dataSize);
-    free(buffer);
+    // Use efficient String constructor with data length
+    outValue = String((const char *)dataPtr).substring(0, header.dataSize);
+
+    if (buffer != stackBuf)
+        free(buffer);
+
     return true;
 }
 
@@ -302,7 +328,9 @@ void NeuNVS::dump(uint8_t id)
         return;
     }
 
-    uint8_t *buffer = (uint8_t *)malloc(storedSize);
+    uint8_t stackBuf[256];
+    uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
+
     if (!buffer)
     {
         Serial.println(F("NeuNVS: Dump alloc failed!"));
@@ -319,28 +347,38 @@ void NeuNVS::dump(uint8_t id)
         memcpy(&header, buffer, sizeof(DataHeader));
         Serial.printf("Header -> XOR: 0x%02X, DataSize: %u\n", header.xorSum, header.dataSize);
 
-        Serial.print("Data   -> Hex: ");
-        for (size_t i = sizeof(DataHeader); i < storedSize; i++)
-        {
-            Serial.printf("%02X ", buffer[i]);
-        }
+        size_t dataLen = storedSize - sizeof(DataHeader);
+        uint8_t *dataPtr = buffer + sizeof(DataHeader);
 
-        Serial.print("\n          Text: ");
-        for (size_t i = sizeof(DataHeader); i < storedSize; i++)
+        for (size_t i = 0; i < dataLen; i += 16)
         {
-            // Cek apakah karakter bisa diprint (ASCII 32-126)
-            if (buffer[i] >= 32 && buffer[i] <= 126)
+            // Print Hex
+            Serial.print("Hex  : ");
+            for (size_t j = 0; j < 16; j++)
             {
-                Serial.print((char)buffer[i]);
+                if (i + j < dataLen)
+                    Serial.printf("%02X ", dataPtr[i + j]);
+                else
+                    Serial.print("   "); // Padding if the last row is not even 16 bytes
             }
-            else
+
+            // Print ASCII
+            Serial.print(" | ");
+            for (size_t j = 0; j < 16; j++)
             {
-                Serial.print('.'); // Ganti karakter non-printable dengan titik
+                if (i + j < dataLen)
+                {
+                    uint8_t b = dataPtr[i + j];
+                    Serial.print((b >= 32 && b <= 126) ? (char)b : '.');
+                }
             }
+            Serial.println();
         }
     }
-    Serial.println(F("\n-------------------------------------------"));
-    free(buffer);
+    Serial.println(F("-------------------------------------------"));
+
+    if (buffer != stackBuf)
+        free(buffer);
 }
 
 size_t NeuNVS::getTotalFreeEntries()

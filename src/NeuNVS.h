@@ -83,7 +83,11 @@ public:
         get_key(id, key);
 
         size_t totalSize = sizeof(DataHeader) + sizeof(T);
-        uint8_t *buffer = (uint8_t *)malloc(totalSize);
+
+        // --- Hybrid Stack/Heap Allocation ---
+        uint8_t stackBuf[64];
+        uint8_t *buffer = (totalSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(totalSize);
+
         if (!buffer)
         {
             triggerError(ERR_ALLOC_FAILED, id);
@@ -99,7 +103,9 @@ public:
             if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
                 _isDirty = true;
         }
-        free(buffer);
+
+        if (buffer != stackBuf)
+            free(buffer);
     }
 
     template <typename T>
@@ -113,16 +119,17 @@ public:
             outValue = defaultValue;
             return false;
         }
+
         char key[6];
         get_key(id, key);
 
         size_t storedSize = 0;
-        esp_err_t err = nvs_get_blob(_handle, key, NULL, &storedSize);
-        if (err == ESP_ERR_NVS_NOT_FOUND)
+        if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK)
         {
             outValue = defaultValue;
             return false;
         }
+
         if (storedSize != sizeof(DataHeader) + sizeof(T))
         {
             triggerError(ERR_SIZE_MISMATCH, id);
@@ -130,7 +137,10 @@ public:
             return false;
         }
 
-        uint8_t *buffer = (uint8_t *)malloc(storedSize);
+        // --- Hybrid Stack/Heap Allocation ---
+        uint8_t stackBuf[64];
+        uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
+
         if (!buffer)
         {
             triggerError(ERR_ALLOC_FAILED, id);
@@ -140,7 +150,8 @@ public:
 
         if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
         {
-            free(buffer);
+            if (buffer != stackBuf)
+                free(buffer);
             outValue = defaultValue;
             return false;
         }
@@ -148,21 +159,19 @@ public:
         DataHeader header;
         memcpy(&header, buffer, sizeof(DataHeader));
         memcpy(&outValue, buffer + sizeof(DataHeader), sizeof(T));
-        free(buffer);
 
-        if (header.xorSum != calculateXOR((uint8_t *)&outValue, sizeof(T)))
+        uint16_t computedXOR = calculateXOR((uint8_t *)&outValue, sizeof(T));
+        bool success = (header.xorSum == computedXOR && header.dataSize == sizeof(T));
+
+        if (!success)
         {
-            triggerError(ERR_DATA_CORRUPT, id);
+            triggerError(header.xorSum != computedXOR ? ERR_DATA_CORRUPT : ERR_SIZE_MISMATCH, id);
             outValue = defaultValue;
-            return false;
         }
-        if (header.dataSize != sizeof(T))
-        {
-            triggerError(ERR_SIZE_MISMATCH, id);
-            outValue = defaultValue;
-            return false;
-        }
-        return true;
+
+        if (buffer != stackBuf)
+            free(buffer);
+        return success;
     }
 };
 
