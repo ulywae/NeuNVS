@@ -1,39 +1,30 @@
-#define NO_GLOBAL_EEPROM
-
 #include <Arduino.h>
 #include <NeuNVS.h>
 
-NeuNVS storage;
-
-// Example data structure to store
+// Example data structure
 struct MyConfig
 {
     float temperature;
     int deviceId;
-    bool status;
+    bool state;
 };
 
-void eepromErrorHandler(uint8_t code, uint8_t id)
+void neuNVSErrorHandler(NeuNVS_Error e, uint8_t id)
 {
-    Serial.println("\n[ CALLBACK DETECTED ]");
-
-    switch (code)
+    Serial.println(F("\n[ 🛡️ NeuNVS EVENT DETECTED ]"));
+    switch (e)
     {
-    case NeuNVS::ERR_LOCKDOWN:
-        Serial.println(">>> ALERT: System Lockdown! Stop writing temporarily.");
-        // Can add: digitalWrite(LED_PIN, HIGH);
+    case NeuNVS_Error::Lock:
+        Serial.printf(">>> ALERT: ID %u is too hot! Lockdown ACTIVE.\n", id);
         break;
-
-    case NeuNVS::ERR_WRITE_FAILED:
-        Serial.println(">>> ALERT: Failed to write to Hardware Flash!");
+    case NeuNVS_Error::ReadFail:
+        Serial.printf(">>> ALERT: ID %u Data Corrupt (CRC Mismatch)!\n", id);
         break;
-
-    case NeuNVS::ERR_DATA_CORRUPT:
-        Serial.printf(">>> ALERT: %u ID Data Corrupt (XOR Mismatch)!\n", id);
+    case NeuNVS_Error::Migration:
+        Serial.printf(">>> SYSTEM: ID %u is migrating to a cooler slot.\n", id);
         break;
-
-    case NeuNVS::ERR_ID_NOT_FOUND:
-        Serial.printf(">>> ALERT: ID %u data size does not match/Wrong type!\n", id);
+    default:
+        Serial.printf(">>> EVENT: %d on ID %d\n", (int)e, id);
         break;
     }
 }
@@ -42,76 +33,101 @@ void setup()
 {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("\n--- Testing NeuNVS ---");
 
-    if (storage.begin())
-        Serial.println("NVS Initialized!");
+    Serial.println(F("\n--- NeuNVS Smart Storage System ---"));
+
+    // Initialize NVS
+    if (neuNVS.begin())
+    {
+        Serial.println(F("NVS Initialized!"));
+    }
     else
-        Serial.println("NVS Failed!");
+    {
+        Serial.println(F("NVS Failed!"));
+        while (1)
+            ;
+    }
 
-    storage.onError(eepromErrorHandler);
+    // Register security guard error
+    neuNVS.onError(neuNVSErrorHandler);
 
-    // 1. Save basic type data (ID 1)
-    uint32_t myNumber = 123456;
-    storage.put(1, myNumber);
-    storage.commit(); // Force first write
+    // Load initial data or set defaults
+    uint32_t myNumber;
+    if (!neuNVS.get(1, myNumber))
+    {
+        myNumber = 123456;
+        neuNVS.put(1, myNumber);
+    }
 
-    // 2. Save data type Struct (ID 2)
-    MyConfig cfg = {25.5, 99, true};
-    storage.put(2, cfg);
-    storage.commit();
-
-    Serial.println("Data Initialized.");
+    MyConfig cfg;
+    if (!neuNVS.get(2, cfg))
+    {
+        cfg = {25.5, 99, true};
+        neuNVS.put(2, cfg);
+    }
 }
 
 void loop()
 {
-    // --- TESTING DIRTY CHECK & UPDATE ---
-    // If the value remains 123456, storage.update() will NOT write to Flash
-    uint32_t val = 123456;
-    storage.put(1, val);
-    storage.update();
+    // 1. UPDATE (MANDATORY): Managing Heat Decay & Auto-Commit
+    // The library will automatically commit to Flash if:
+    // - There is new data (Dirty)
+    // - The COMMIT_MS time interval has been met
+    // - The system is not in Lockdown
+    neuNVS.update();
 
-    // --- TESTING READING ---
+    // 2. WRITE SIMULATION (Change value every 10 seconds)
+    static uint32_t lastChange = 0;
+    if (millis() - lastChange > 10000)
+    {
+        lastChange = millis();
+        uint32_t newVal = random(1000, 9000);
+
+        Serial.printf("\nUpdating ID 1 to: %u (Pending Auto-Commit)\n", newVal);
+        neuNVS.put(1, newVal);
+        // We don't need to call commit() manually, let update() take care of it!
+    }
+
+    // 3. MONITORING & DUMP (Every 5 seconds)
     static uint32_t lastPrint = 0;
     if (millis() - lastPrint > 5000)
-    { // Print every 5 seconds
+    {
         lastPrint = millis();
 
         uint32_t readVal;
         MyConfig readCfg;
+        neuNVS.get(1, readVal);
+        neuNVS.get(2, readCfg);
 
-        storage.get(1, readVal);
-        storage.get(2, readCfg);
+        Serial.println(F("\n--- System Status ---"));
+        Serial.printf("ID 1: %u | ID 2 Temp: %.2f\n", readVal, readCfg.temperature);
+        Serial.printf("Current Heat Max: %.2f\n", neuNVS.getHeatMax());
 
-        Serial.println("\n--- Current Data ---");
-        Serial.printf("ID 1 (uint32): %u\n", readVal);
-        Serial.printf("ID 2 (Struct): Temp: %.2f, ID: %d, Active: %s\n",
-                      readCfg.temperature, readCfg.deviceId, readCfg.status ? "Yes" : "No");
-
-        if (storage.isLocked())
-            Serial.println("STATUS: [LOCKED] Storage is being protected!");
-        else
-            Serial.println("STATUS: [READY] Storage is normal.");
+        if (neuNVS.isLocked())
+            Serial.println(F("STATUS: [LOCKED] Protection Active!"));
     }
 
-    // --- TESTING LOCKDOWN (For testing only) ---
-    // Type 'L' in the Serial Monitor to trigger a forced write loop
+    // 4. ABUSE TEST (Send 'L' to torture Flash)
     if (Serial.available() > 0)
     {
         char cmd = Serial.read();
         if (cmd == 'L')
         {
-            Serial.println("\nTriggering forced write burst (Abuse Test)...");
-            for (int i = 0; i < 10; i++)
+            Serial.println(F("\n!!! TRIGGERING BURST WRITE (ABUSE TEST) !!!"));
+            for (int i = 0; i < 20; i++)
             {
-                uint32_t randomVal = random(100, 999);
-                storage.put(1, randomVal);
-                if (storage.commit())
-                    Serial.printf("Commit %d success\n", i + 1);
-                else
-                    Serial.printf("Commit %d FAILED (Detected Abuse/Locked)\n", i + 1);
+                uint32_t val = i;
+                neuNVS.put(1, val);
+                // Here we force a manual commit to trigger a quick Lockdown
+                neuNVS.commit();
+                Serial.print(".");
+                delay(10);
             }
+            Serial.println();
+        }
+        else if (cmd == 'D')
+        {
+            neuNVS.dump(); // View the mapping and heatmap internals
         }
     }
 }
