@@ -295,7 +295,9 @@ if (neuNVS.isLocked()) {
 | `getHeatAvg()` | Returns the average heat level of the entire namespace to monitor overall flash usage.  |
 | `dump()`              | The Diagnostic Window. Prints a complete visual map of Logical IDs, Physical Slots, Heatmaps, and Spare Slots to the Serial Monitor.  |
 
-> [!TIP] for Developers
+> [!TIP]
+> 
+> For Developers
 > 
 > Integrating getHeatMax() into your dashboard or telemetry is a great way to monitor how "aggressive" your firmware is towards the ESP32 Flash memory in real-world deployments.
 
