@@ -1,25 +1,38 @@
 #include "NeuNVS.h"
 
-uint8_t NeuNVS::_instanceCount = 0;
+uint8_t NeuNVS::_inst = 0;
 
-NeuNVS::NeuNVS() : _handle(0), _lastCommitTime(0), _interval(1000),
-                   _isDirty(false), _lockdownUntil(0),
-                   _lockdownDuration(5000), _isValid(true),
-                   _adaptiveInterval(1000), _maxInterval(5000), _maxHeat(10.0f),
-                   _predictWindow(1000.0f), _lastPutTime(0), _heat(0.0f)
+// ========== CONSTRUCTOR ==========
+NeuNVS::NeuNVS() : _h(0), _m(nullptr), _valid(true), _dirty(false),
+                   _lastCommit(0), _lockUntil(0), _cb(nullptr)
 {
-    // Initialize the cache so that it does not contain junk data
-    memset(_xorCache, 0, sizeof(_xorCache));
 
-    if (_instanceCount < NeuNVSConstants::MAX_INSTANCES)
-    {
-        snprintf(_currentNS, sizeof(_currentNS), "ns%u", _instanceCount);
-        _instanceCount++;
+    if (_inst >= 255)
+    { // Check instance limits in general
+        _valid = false;
+        return;
     }
-    else
+
+    snprintf(_ns, sizeof(_ns), "ns%d", _inst++);
+
+    // 1. Reset ALL physical slots to empty state
+    for (uint8_t i = 0; i < NeuNVSConfig::PHYS_SLOTS; i++)
     {
-        _isValid = false;
-        _currentNS[0] = '\0';
+        _revMap[i] = 255;
+        _slotHeat[i] = 0.0f;
+    }
+
+    // 2. Initialize logical data and initial mapping (0 to 0, 1 to 1, etc.)
+    for (uint8_t i = 0; i < NeuNVSConfig::MAX_IDS; i++)
+    {
+        _heatMap[i] = 0.0f;
+        _heatVelocity[i] = 0.0f;
+        _lastHeat[i] = 0.0f;
+        _heatThreshold[i] = NeuNVSConfig::HEAT_LOCK;
+        _lastWriteMap[i] = 0;
+
+        _map[i] = i;    // Mapping logical i to physical i
+        _revMap[i] = i; // Mark physical slot i as owned by logical i
     }
 }
 
@@ -28,466 +41,166 @@ NeuNVS::~NeuNVS()
     end();
 }
 
-bool NeuNVS::begin(uint32_t intervalMs, uint32_t lockSec)
+// ========= Begin =========
+bool NeuNVS::begin(uint32_t commitMs, uint32_t lockMs)
 {
-    if (!_isValid)
+    if (!_valid)
+        return false;
+    if (nvs_flash_init() != ESP_OK)
+        return false;
+    if (nvs_open(_ns, NVS_READWRITE, &_h) != ESP_OK)
         return false;
 
-    _interval = intervalMs;
-    _adaptiveInterval = intervalMs; // Reset adaptive to base interval
-    _lockdownDuration = lockSec * 1000;
-
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        nvs_flash_erase();
-        err = nvs_flash_init();
-    }
-    if (err != ESP_OK)
+    _m = xSemaphoreCreateMutex(); // Create a Mutex FIRST
+    if (!_m)
         return false;
 
-    err = nvs_open(_currentNS, NVS_READWRITE, &_handle);
-    if (err != ESP_OK)
-        return false;
+    _loadMap(); // Now safe if loadMap needs to call saveMap internally.
 
-    // --- WARM UP CACHE ---
-    memset(_xorCache, 0, sizeof(_xorCache));
-
-    for (uint8_t i = 0; i < NeuNVSConstants::MAX_IDS; i++)
-    {
-        char key[NeuNVSConstants::MAX_KEY_LEN];
-        get_key(i, key);
-
-        DataHeader header;
-        size_t required = sizeof(DataHeader);
-
-        esp_err_t readErr = nvs_get_blob(_handle, key, &header, &required);
-
-        // Validation: Ensure the data exists AND has the correct Magic Bytes
-        if ((readErr == ESP_OK || readErr == ESP_ERR_NVS_INVALID_LENGTH) && header.magic == 0xA5)
-        {
-            _xorCache[i] = header.xorChecksum;
-        }
-    }
+    _lockMs = lockMs;
+    _commitMs = commitMs;
+    _lastCommit = millis();
 
     return true;
 }
 
+// ========= End =========
 void NeuNVS::end()
 {
-    if (_handle)
+    if (_h)
     {
-        if (_isDirty)
-            commit(); // Only commit if there are actual changes
-        nvs_close(_handle);
-        _handle = 0;
+        if (_dirty && xSemaphoreTake(_m, 10))
+        {
+            nvs_commit(_h);
+            xSemaphoreGive(_m);
+        }
+        nvs_close(_h);
+        _h = 0;
+    }
+
+    if (_m)
+    {
+        vSemaphoreDelete(_m);
+        _m = nullptr;
     }
 }
 
-void NeuNVS::get_key(uint8_t id, char *keyOut)
+// ========== PUT RAW ==========
+bool NeuNVS::put(uint8_t id, const uint8_t *data, size_t len)
 {
-    // Use "k%u" for shorter and safer buffer size 6
-    // "id255" + null terminator fits 6 bytes.
-    snprintf(keyOut, NeuNVSConstants::MAX_KEY_LEN, "k%u", id);
-}
-
-void NeuNVS::onError(EEPROMErrorCallback callback)
-{
-    _errorCallback = callback;
-}
-
-void NeuNVS::triggerError(uint8_t code, uint8_t id)
-{
-    if (_errorCallback)
-        _errorCallback(code, id);
-}
-
-bool NeuNVS::isLocked()
-{
-    return (safeMillis() < _lockdownUntil);
-}
-
-uint16_t NeuNVS::calculateXOR(const uint8_t *data, size_t len)
-{
-    uint16_t xorResult = 0xAA55; // A more unique seed for XOR
-    for (size_t i = 0; i < len; i++)
-        xorResult = (xorResult ^ data[i]) + (xorResult << 1); // Variations to minimize collisions
-    return xorResult;
-}
-
-bool NeuNVS::isDataIdentical(uint8_t id, const uint8_t *newData, size_t newSize)
-{
-    if (id >= NeuNVSConstants::MAX_IDS)
+    if (!data || len == 0)
         return false;
 
-    // Take the XOR of the new data sent (located in the first 2 bytes of the buffer)
-    uint16_t newXOR;
-    memcpy(&newXOR, newData, sizeof(uint16_t));
-
-    // Compare with Cache in RAM
-    if (_xorCache[id] == newXOR)
+    if (len > NeuNVSConfig::MAX_BLOB)
     {
-        return true;
+        _err(NeuNVS_Error::TooLarge, id);
+        return false;
     }
 
-    // DO NOT update the cache here.
-    // Cache updates should only be done in put() AFTER nvs_set_blob succeeds.
-    return false;
+    return _write(id, data, len);
 }
 
+bool NeuNVS::get(uint8_t id, uint8_t *out, size_t len)
+{
+    // 1. Validasi input dasar
+    if (!out || len == 0)
+        return false;
+
+    // 2. Langsung baca ke buffer 'out' milik user
+    // _read akan memanggil _read_raw yang sudah punya pengecekan size internal
+    return _read(id, out, len);
+}
+
+// ========= Update (call often in loop) =========
 void NeuNVS::update()
 {
-    if (!_isValid || !_handle || !_isDirty)
-    {
-        // Passive cooling while idle
-        _heat *= 0.98f;
+    if (!_h)
         return;
+
+    uint32_t now = millis();
+
+    // 1. LIMITER CPU (Jalankan kalkulasi heat tiap 20ms saja)
+    static uint32_t lastHeatUpdate = 0;
+    if (now - lastHeatUpdate < 20)
+        return;
+
+    // Hitung delta time dalam detik
+    float dt = (now - lastHeatUpdate) * 0.001f;
+    lastHeatUpdate = now;
+
+    // 2. HEAT & PREDICTION LOGIC
+    float maxHeat = 0.0f;
+    for (uint8_t i = 0; i < NeuNVSConfig::MAX_IDS; i++)
+    {
+        float &h = _heatMap[i];
+
+        // Decay (Peluruhan panas)
+        h *= (1.0f - dt * NeuNVSConfig::DECAY_RATE);
+        if (h < 0.0f)
+            h = 0.0f;
+
+        // Velocity & Prediction (Menghitung seberapa cepat user nyepam)
+        float dv = (h - _lastHeat[i]) / (dt + 0.0001f);
+        _heatVelocity[i] = _heatVelocity[i] * 0.8f + dv * 0.2f;
+        _lastHeat[i] = h;
+
+        float predicted = h + _heatVelocity[i] * NeuNVSConfig::PREDICT_GAIN;
+
+        // Adaptive Threshold (Semakin cepat nyepam, threshold semakin turun/ketat)
+        _heatThreshold[i] = NeuNVSConfig::HEAT_LOCK - (predicted * NeuNVSConfig::THRESHOLD_K);
+
+        // Sinkronisasi panas ke slot fisik (untuk kebutuhan dump/wear leveling)
+        _slotHeat[_map[i]] = h;
+
+        if (h > maxHeat)
+            maxHeat = h;
     }
 
-    uint32_t now = safeMillis();
+    // 3. LOCKDOWN MANAGEMENT
+    // Menggunakan int32_t cast untuk menangani millis rollover
+    if (_lockUntil && (int32_t)(now - _lockUntil) >= 0)
+        _lockUntil = 0;
 
-    // Lockdown protection active
-    if (now < _lockdownUntil)
-        return;
+    // 4. SMART COMMIT (Delayed Write)
+    if (_dirty && !_lockUntil)
+    {
+        // Interval commit dinamis: Semakin panas, semakin lama nunggu (biar gak nyiksa flash)
+        uint32_t dynamicInterval = _commitMs + (uint32_t)(maxHeat * 100.0f);
 
-    // Adaptive Auto-Commit Logic
-    // We commit if:
-    // 1. The adaptive interval has passed
-    // 2. OR it has been idle for a long time (no new put()s have been received)
-    uint32_t timeSinceLastPut = now - _lastPutTime;
-    uint32_t timeSinceLastCommit = now - _lastCommitTime;
-
-    // Calculate the prediction window (when it's 'safe' to write)
-    float dynamicWindow = _predictWindow * (1.0f + _heat * 0.2f);
-
-    if (timeSinceLastPut >= dynamicWindow && timeSinceLastCommit >= _adaptiveInterval)
-        commit();
+        if ((int32_t)(now - _lastCommit) > (int32_t)dynamicInterval)
+            commit(); // Panggil fungsi commit yang sudah ada Mutex-nya
+    }
 }
 
-bool NeuNVS::commit()
+// ================= STRING API =================
+void NeuNVS::putString(uint8_t id, const String &v)
 {
-    if (!_isValid || !_handle || !_isDirty)
-        return !_isDirty;
-
-    uint32_t now = safeMillis();
-    if (now < _lockdownUntil)
-        return false;
-
-    uint32_t delta = now - _lastCommitTime;
-
-    // 1. ADAPTIVE HEAT PENALTY
-    if (delta < _interval)
+    // Tambahkan +1 agar null terminator ikut tersimpan
+    // Pastikan tidak melebihi MAX_BLOB
+    size_t len = v.length() + 1;
+    if (len > NeuNVSConfig::MAX_BLOB)
     {
-        float penalty = (float)(_interval - delta) / _interval;
-        _heat += penalty * 0.8f; // Increase to be more firm against looping
+        _err(NeuNVS_Error::TooLarge, id);
+        return;
     }
-    else
-        _heat *= 0.80f; // Cooling is faster if the user is orderly
+    _write(id, (const uint8_t *)v.c_str(), len);
+}
 
-    if (_heat > _maxHeat)
-        _heat = _maxHeat;
+bool NeuNVS::getString(uint8_t id, String &out, const String &def)
+{
+    uint8_t b[NeuNVSConfig::MAX_BLOB + 1]; // +1 untuk null terminator aman
+    memset(b, 0, sizeof(b));
 
-    // 2. LOCKDOWN CHECK (Threshold aggressive 6.0)
-    if (_heat >= 6.0f)
+    // Langsung baca ke buffer lokal b
+    if (_read(id, b, NeuNVSConfig::MAX_BLOB))
     {
-        _lockdownUntil = now + _lockdownDuration;
-        triggerError(ERR_LOCKDOWN, 0);
-        return false;
-    }
-
-    // 3. ADAPTIVE INTERVAL CALCULATION
-    _adaptiveInterval = _interval + (uint32_t)(_heat * 100.0f);
-    _adaptiveInterval = constrain(_adaptiveInterval, _interval, _maxInterval);
-
-    // 4. EXECUTION
-    if (nvs_commit(_handle) == ESP_OK)
-    {
-        _lastCommitTime = now;
-        _isDirty = false;
+        out = (char *)b;
         return true;
     }
 
-    _heat += 2.0f; // Extra penalty if hardware fails to respond
+    out = def;
     return false;
 }
 
-bool NeuNVS::remove(uint8_t id)
-{
-    if (!_isValid || !_handle || id >= NeuNVSConstants::MAX_IDS)
-        return false;
-
-    if (safeMillis() < _lockdownUntil)
-        return false;
-
-    char key[NeuNVSConstants::MAX_KEY_LEN];
-    get_key(id, key);
-
-    if (nvs_erase_key(_handle, key) == ESP_OK)
-    {
-        _xorCache[id] = 0; // Clear cache to sync
-        _isDirty = true;
-        return true;
-    }
-    return false;
-}
-
-bool NeuNVS::clearAll()
-{
-    // 1. Check validity & Lockdown
-    if (!_isValid || !_handle || safeMillis() < _lockdownUntil)
-        return false;
-
-    // 2. Execute erase in NVS
-    if (nvs_erase_all(_handle) == ESP_OK)
-    {
-        // 3. IMPORTANT: Reset RAM Cache
-        // So that subsequent put()s don't assume the data is still there (false positives are identical)
-        memset(_xorCache, 0, sizeof(_xorCache));
-
-        // 4. Reset internal state
-        _isDirty = false; // nvs_erase_all usually automatically commits, but nvs_commit is still recommended
-
-        // According to your code logic: call commit to finalize
-        if (nvs_commit(_handle) == ESP_OK)
-        {
-            _heat *= 0.5f; // Gives a cooling bonus because memory is now free
-            return true;
-        }
-    }
-
-    triggerError(ERR_WRITE_FAILED, 0);
-    return false;
-}
-
-bool NeuNVS::exists(uint8_t id)
-{
-    if (!_isValid || !_handle)
-        return false;
-
-    char key[NeuNVSConstants::MAX_KEY_LEN];
-    get_key(id, key);
-
-    size_t size = 0;
-    esp_err_t err = nvs_get_blob(_handle, key, NULL, &size);
-    return (err != ESP_ERR_NVS_NOT_FOUND);
-}
-
-void NeuNVS::putString(uint8_t id, const String &value)
-{
-    if (!_isValid || !_handle || id >= NeuNVSConstants::MAX_IDS)
-        return;
-
-    size_t dataLen = value.length();
-    uint16_t newXor = calculateXOR((const uint8_t *)value.c_str(), dataLen);
-
-    // 1. DIRTY CHECK (Fast via RAM)
-    if (_xorCache[id] == newXor)
-        return;
-
-    // 2. LOCKDOWN PROTECTION
-    uint32_t now = safeMillis();
-    if (now < _lockdownUntil)
-        return;
-
-    // 3. UPDATE HEAT
-    uint32_t dt = now - _lastPutTime;
-    _heat += (dt < 500) ? (1.0f - (float)dt / 500.0f) * 0.5f : 0;
-    if (_heat > _maxHeat)
-        _heat = _maxHeat;
-    _lastPutTime = now;
-
-    // 4. PREPARE DATA
-    char key[NeuNVSConstants::MAX_KEY_LEN];
-    get_key(id, key);
-
-    size_t totalSize = sizeof(DataHeader) + dataLen;
-    uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_STRING];
-    uint8_t *buffer = (totalSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(totalSize);
-
-    if (!buffer)
-    {
-        triggerError(ERR_ALLOC_FAILED, id);
-        return;
-    }
-
-    // Arrange the Header complete with Magic Bytes
-    DataHeader header = {newXor, (uint16_t)dataLen, 0xA5, 1, 0};
-    memcpy(buffer, &header, sizeof(DataHeader));
-    memcpy(buffer + sizeof(DataHeader), value.c_str(), dataLen);
-
-    // 5. WRITE TO NVS
-    if (nvs_set_blob(_handle, key, buffer, totalSize) == ESP_OK)
-    {
-        _isDirty = true;
-        _xorCache[id] = newXor; // Update cache RAM
-    }
-
-    if (buffer != stackBuf)
-        free(buffer);
-}
-
-bool NeuNVS::getString(uint8_t id, String &outValue, const String &defaultValue)
-{
-    if (!_isValid || !_handle)
-    {
-        outValue = defaultValue;
-        return false;
-    }
-
-    char key[NeuNVSConstants::MAX_KEY_LEN];
-    get_key(id, key);
-
-    size_t storedSize = 0;
-    if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK || storedSize < sizeof(DataHeader))
-    {
-        outValue = defaultValue;
-        return false;
-    }
-
-    uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_STRING];
-    uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
-
-    if (!buffer || nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
-    {
-        if (buffer && buffer != stackBuf)
-            free(buffer);
-        outValue = defaultValue;
-        return false;
-    }
-
-    DataHeader header;
-    memcpy(&header, buffer, sizeof(DataHeader));
-
-    // VALIDASI MAGIC BYTE
-    if (header.magic != 0xA5)
-    {
-        triggerError(ERR_DATA_CORRUPT, id);
-        if (buffer != stackBuf)
-            free(buffer);
-        outValue = defaultValue;
-        return false;
-    }
-
-    uint8_t *dataPtr = buffer + sizeof(DataHeader);
-    uint16_t computedXOR = calculateXOR(dataPtr, header.dataSize);
-
-    if (header.xorChecksum != computedXOR)
-    {
-        triggerError(ERR_DATA_CORRUPT, id);
-        if (buffer != stackBuf)
-            free(buffer);
-        outValue = defaultValue;
-        return false;
-    }
-
-    outValue = String((const char *)dataPtr, header.dataSize);
-
-    if (buffer != stackBuf)
-        free(buffer);
-    return true;
-}
-
-void NeuNVS::dump(uint8_t id, size_t byteInLen)
-{
-    if (!_isValid || !_handle)
-    {
-        Serial.println(F("NeuNVS: Instance invalid!"));
-        return;
-    }
-
-    char key[NeuNVSConstants::MAX_KEY_LEN];
-    get_key(id, key);
-
-    size_t storedSize = 0;
-    if (nvs_get_blob(_handle, key, NULL, &storedSize) != ESP_OK)
-    {
-        Serial.printf("ID %u: Key '%s' not found.\n", id, key);
-        return;
-    }
-
-    uint8_t stackBuf[NeuNVSConstants::STACK_BUFFER_DUMP];
-    uint8_t *buffer = (storedSize <= sizeof(stackBuf)) ? stackBuf : (uint8_t *)malloc(storedSize);
-
-    if (!buffer)
-    {
-        Serial.println(F("NeuNVS: Dump alloc failed!"));
-        return;
-    }
-
-    if (nvs_get_blob(_handle, key, buffer, &storedSize) != ESP_OK)
-    {
-        Serial.println(F("NeuNVS: Dump read failed!"));
-        if (buffer != stackBuf)
-            free(buffer);
-        return;
-    }
-
-    Serial.printf("\n=== NeuNVS Dump ID: %u (%u bytes) ===\n", id, (uint32_t)storedSize);
-
-    if (storedSize >= sizeof(DataHeader))
-    {
-        DataHeader header;
-        memcpy(&header, buffer, sizeof(DataHeader));
-
-        // Show Full Header info
-        Serial.printf("Header -> Magic: 0x%02X | Ver: %u | XOR: 0x%04X | Size: %u\n",
-                      header.magic, header.version, header.xorChecksum, header.dataSize);
-
-        if (header.magic != 0xA5)
-            Serial.println(F("WARNING: Magic Byte mismatch! Data might be corrupt."));
-
-        size_t dataLen = (storedSize > sizeof(DataHeader)) ? (storedSize - sizeof(DataHeader)) : 0;
-        uint8_t *dataPtr = buffer + sizeof(DataHeader);
-
-        if (dataLen > 0)
-        {
-            for (size_t i = 0; i < dataLen; i += byteInLen)
-            {
-                Serial.printf("[%04u] ", i);
-                // Print Hex
-                for (size_t j = 0; j < byteInLen; j++)
-                {
-                    if (i + j < dataLen)
-                        Serial.printf("%02X ", dataPtr[i + j]);
-                    else
-                        Serial.print("   ");
-                }
-
-                Serial.print("| ");
-                // Print ASCII
-                for (size_t j = 0; j < byteInLen; j++)
-                {
-                    if (i + j < dataLen)
-                    {
-                        uint8_t b = dataPtr[i + j];
-                        Serial.print((b >= 32 && b <= 126) ? (char)b : '.');
-                    }
-                }
-                Serial.println();
-            }
-        }
-        else
-            Serial.println(F("Body   -> (Empty)"));
-    }
-    Serial.println(F("==========================================="));
-
-    if (buffer != stackBuf)
-        free(buffer);
-}
-
-size_t NeuNVS::getTotalFreeEntries()
-{
-    if (!_isValid)
-        return 0;
-
-    nvs_stats_t stats;
-    // Use NULL to get total nvs partition statistics
-    if (nvs_get_stats(NULL, &stats) == ESP_OK)
-        return stats.free_entries;
-
-    return 0;
-}
-
-#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_EEPROM)
+// ========= Global instance =========
 NeuNVS neuNVS;
-#endif
