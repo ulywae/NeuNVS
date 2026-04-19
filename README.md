@@ -2,10 +2,9 @@
 
 **High-Performance & Hardware-Protected NVS Library for ESP32**
 
-The Smartest, Fastest, and Safest Hardware-Protected Storage for the ESP32.
-NeuNVS is a next-generation storage library for the ESP32 designed as a high-performance alternative to `Preferences` and `EEPROM`.
+NeuNVS is a next-generation storage library for the ESP32, designed as a high-performance, intelligent alternative to the standard Preferences and EEPROM libraries.
 
-This library not only stores data but also actively protects your hardware using an intelligent Virtual Heat Meter algorithm that works like a CPU's thermal protection system to maintain the longevity of your Flash memory.
+NeuNVS isn't just a simple wrapper around NVS; it is a Flash Management System built with the instinct to protect your ESP32 hardware from premature death caused by excessive write cycles (flash burnout). It doesn't just store data—it actively guards your hardware using an Intelligent Virtual Heat Meter algorithm. Much like a CPU's thermal protection system, it monitors write pressure and manages your Flash memory's longevity autonomously.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: ESP32](https://img.shields.io/badge/Platform-ESP32-blue?logo=espressif&logoColor=white)](https://espressif.com)
@@ -14,63 +13,35 @@ This library not only stores data but also actively protects your hardware using
 
 ---
 
-## Why NeuNVS?
+## Why Use NeuNVS?
 
 Standard libraries often neglect hardware health and data integrity.
 
-**NeuNVS** is designed to fill this gap with four core pillars:
-
-- **Ultra-Fast ID System** Uses a numeric ID (0-255) instead of a String Key, enabling near-instant memory access by eliminating string-parsing overhead.
+- **Adaptive Wear Leveling (Migration)** The only library that monitors the "temperature" of your data. If one physical slot is overwritten, NeuNVS will automatically move that data to a cooler spare slot without you even realizing it.
 
 - **Smart Thermal Throttling** An exclusive "Heat Meter" feature. The library monitors the intensity of data writes and automatically locks down if it detects activity that could jeopardize Flash lifespan (such as a loop bug)
 
-- **Data Integrity** Every data block is secured with a Magic Byte and XOR Checksum. Say goodbye to corrupted data and silent failures!
+- **Ultra-Low Latency (Zero-Copy)** Read operations only take about ~600us, because data is directly streamed to your variable without going through unnecessary intermediate buffers.
 
-- **Hybrid Memory Management** Minimizes RAM fragmentation using an intelligent allocation strategy (Stack/Heap Hybrid), ensuring stability even in long-running projects.
+- **Data Integrity & Thread-Safety** Each data block is protected by CRC16 and a Magic Number. Equipped with a Mutex (Semaphore) for safe use in multi-tasking environments (Dual-Core).
 
----
-
-## Benchmark Results
-
-Tested on **ESP32-D0WDQ6** (v1.0.1).
-Results show that NeuNVS significantly outperforms standard libraries.
-
-| Feature                      | NeuNVS (Ours)           | Standard Preferences | Improvement        |
-| :--------------------------- | :---------------------- | :------------------- | :----------------- |
-| **Dirty Check Skip**         | **28 µs**               | 18,435 µs            | **650x Faster!**   |
-| **Complex Struct (100 ops)** | **24.9 ms**             | 980.2 ms             | **39.3x Faster!**  |
-| **Safety System**            | **Adaptive Throttling** | None (Burn Out Risk) | **Hardware Safe**  |
-| **RAM Usage**                | **Hybrid Stack**        | Heap Allocation      | **Minimized Frag** |
-
-> **Note:** "Dirty Check Skip" refers to the time taken to verify that data hasn't changed, preventing unnecessary Flash writes and extending hardware lifespan.
-
-<p align="center">
-  <img src="assets/benchmark_result_1.png" width="400">
-</p>
-
-<p align="center">
-  <img src="assets/benchmark_result_2.png" width="400">
-</p>
-
-<p align="center">
-  <em>Real-world benchmark logs captured from Serial Monitor (ESP32-D0WDQ6)</em>
-</p>
+- **System Transparency** Use the dump() function to view the "innards" of your Flash: physical slot positions, heatmaps, and even real-time lockdown status.
 
 ---
 
 ## Key Features
 
-- **XOR Data Integrity:** Every data block (including Strings!) is protected with ultra-lightweight XOR checksum and size validation. No more corrupt data!
+- **CRC16 Data Integrity:** Every data block (including Strings!) is guarded by a CRC16 checksum and magic-number validation. No more silent data corruption!
 
-- **Hardware Lockdown:** Exclusive "Abuse Protection" that automatically locks Flash writes if a loop-bug or frequent commits are detected (configurable threshold).
+- **Hardware Lockdown:** Exclusive "Spam Protection" that automatically locks Flash writes if a loop-bug or excessive commits are detected. It's like thermal throttling for your Flash memory.
 
-- **Smart Dirty Check:** Internal comparison prevents unnecessary Flash writes, extending your hardware's lifespan significantly.
+- **Active Wear-Leveling:** Intelligent Migration Logic that automatically moves "hot" data to cooler physical slots to ensure even wear across your Flash partition.
 
 - **Auto-Namespace:** Seamlessly handle multiple instances with automatic namespace allocation (`ns0`, `ns1`, ...).
 
-- **Ultra-Lightweight:** Minimal stack usage, no dynamic memory allocation for POD types.
+- **Zero-Copy Performance:** High-speed data retrieval with minimal CPU overhead. No unnecessary dynamic memory allocation for POD types.
 
-- **Full String Support:** String data is also protected with XOR checksum (unlike many alternatives).
+- **Diagnostic Window:** Built-in dump() feature that gives you a "God View" of your storage health, heatmap, and physical slot mapping.
 
 ---
 
@@ -81,6 +52,7 @@ Results show that NeuNVS significantly outperforms standard libraries.
 1. Download this repository as a `.zip`
 2. Go to **Sketch** → **Include Library** → **Add .ZIP Library**
 3. Select the downloaded file
+4. Or download directly from the library manager on Arduino
 
 ### PlatformIO
 
@@ -108,8 +80,8 @@ struct UserSettings {
 void setup() {
     Serial.begin(115200);
 
-    // Initialize with 1s auto-commit interval, 5s lockdown duration, max 5 commits
-    if (!neuNVS.begin(1000, 5, 5)) {
+    // Initialize with 1s auto-commit interval, 3000ms lockdown duration
+    if (!neuNVS.begin(1000, 3000)) {
         Serial.println("Failed to initialize NeuNVS!");
         return;
     }
@@ -155,26 +127,34 @@ void loop() {
 Get notified when hardware issues or data corruption occurs:
 
 ```cpp
-void onStorageError(uint8_t code, uint8_t id) {
-    switch(code) {
-        case NeuNVS::ERR_LOCKDOWN:
-            Serial.println("Hardware Protected: Too many writes!");
+void handleNeuNVSErrors(NeuNVS_Error e, uint8_t id) {
+    Serial.print(F("[NeuNVS Event] "));
+    
+    switch (e) {
+        case NeuNVS_Error::Lock:
+            Serial.printf("LOCKDOWN! ID %d is too hot. Write ignored for protection.\n", id);
             break;
-        case NeuNVS::ERR_DATA_CORRUPT:
-            Serial.printf("Data corrupted at ID: %d\n", id);
+        case NeuNVS_Error::InvalidID:
+            Serial.printf("ERROR: ID %d is out of range (Check MAX_IDS).\n", id);
             break;
-        case NeuNVS::ERR_SIZE_MISMATCH:
-            Serial.printf("Size mismatch for ID: %d\n", id);
+        case NeuNVS_Error::NotFound:
+            Serial.printf("INFO: ID %d not found (Normal for first-time access).\n", id);
             break;
-        case NeuNVS::ERR_WRITE_FAILED:
-            Serial.println("Flash write failed!");
+        case NeuNVS_Error::ReadFail:
+            Serial.printf("CRITICAL: ID %d data is corrupt (CRC Error)!\n", id);
+            break;
+        case NeuNVS_Error::Migration:
+            Serial.printf("SYSTEM: ID %d is migrating to a cooler slot.\n", id);
+            break;
+        default:
+            Serial.printf("Event Code: %d on ID %d\n", (int)e, id);
             break;
     }
 }
 
 void setup() {
-    neuNVS.onError(onStorageError);
     neuNVS.begin();
+    neuNVS.onError(handleNeuNVSErrors);
 }
 ```
 
@@ -185,7 +165,7 @@ neuNVS.put(5, 100);
 neuNVS.commit();   // Force immediate write
 
 neuNVS.remove(5);  // Delete specific ID
-neuNVS.clearAll(); // Factory reset entire namespace
+neuNVS.clear();    // Factory reset entire namespace
 ```
 
 ### Multiple Instances
@@ -209,11 +189,34 @@ void setup() {
 >
 > ### ID Scope & Range
 >
-> - **ID Range:** You can use IDs from **0 to 255**.
+> - **ID Range:** By default, you can use IDs from 0 to 63 (Total 64 IDs).
+> - **Flexible Capacity:** Need more? You can easily change MAX_IDS in NeuNVSConfig to suit your needs (up to 254).
 > - **Isolated Scope:** This ID range is **local per-instance**.
-> - **Example:** You can store data under `ID 1` in `configStorage` and different data under `ID 1` in `userStorage`. They won't overwrite each other because they're automatically stored in different namespaces (`ns0`, `ns1`, etc.).
+> - **Zero Conflict:** You can store data under `ID 1` in `configStorage` and different data under `ID 1` in `userStorage`. They won't overwrite each other because they're automatically stored in different namespaces (`ns0`, `ns1`, etc.).
+
+[!TIP]
+
+Why 64 IDs? NeuNVS is designed for high-performance and safety. Each ID consumes a small amount of RAM to track its "Heat" and "Migration" status. 64 IDs is the sweet spot for most IoT projects.
+
+Pro Tip: Use Structs!
+Don't waste your IDs by storing single variables (like one ID for age, another for height). Instead, wrap your related data into a struct and store it in one single ID.
+
+```cpp
+struct UserSettings {
+  int age;
+  float height;
+  bool isAdmin;
+};
+
+UserSettings mySet = {25, 170.5f, true};
+neuNVS.put(0, mySet); // Efficient: 3 variables in 1 ID!
+```
+
+This approach saves your ID slots and significantly reduces RAM consumption for heat tracking.
 
 ### Check Lockdown Status
+
+Writes are temporarily blocked due to excessive write spamming to preserve Flash lifespan.
 
 ```cpp
 if (neuNVS.isLocked()) {
@@ -229,15 +232,19 @@ if (neuNVS.isLocked()) {
 
 | Code | Name                   | Description                                        |
 | :--- | :--------------------- | :------------------------------------------------- |
-| 0    | `ERR_NONE`             | Operation successful.                              |
-| 1    | `ERR_LOCKDOWN`         | Abuse protection active! Too many writes detected. |
-| 2    | `ERR_WRITE_FAILED`     | Flash write operation failed at NVS level.         |
-| 3    | `ERR_READ_FAILED`      | Failed to read data from flash memory.             |
-| 4    | `ERR_ID_NOT_FOUND`     | Requested ID doesn't exist.                        |
-| 5    | `ERR_DATA_CORRUPT`     | XOR checksum mismatch (Data is corrupted!).        |
-| 6    | `ERR_SIZE_MISMATCH`    | Data size doesn't match the stored value.          |
-| 7    | `ERR_INSTANCE_INVALID` | Instance not valid (Max 254).                      |
-| 8    | `ERR_ALLOC_FAILED`     | Out of RAM (Heap) while processing data.           |
+| 0    | `None	`             | No error. Everything is running normally.                            |
+| 1    | `Lock`         | Thermal Protection Active!  |
+| 2    | `WriteFail`     | Flash write operation failed at NVS level.         |
+| 3    | `ReadFail`      | Failed to read data from flash memory.             |
+| 4    | `NotFound`     | Requested ID doesn't exist.                        |
+| 5    | `TooLarge`     | Data size exceeds MAX_BLOB (256 bytes).        |
+| 6    | `SystemFail`    | Failed NVS initialization or out of RAM |
+| 7    | `InvalidID` | ID usage is out of range (Check MAX_IDS or PHYS_SLOTS). |
+| 8    | `Migration`     | System Event: NeuNVS is moving your data to a cooler physical slot (Wear Leveling). |
+
+[Pro-Tip]
+
+Use the Migration event to monitor how intelligently this library is protecting your hardware. If you see this event, it means NeuNVS has just automatically extended the lifespan of your ESP32!
 
 ---
 
@@ -247,10 +254,20 @@ if (neuNVS.isLocked()) {
 
 | Method                       | Description                                                      |
 | :--------------------------- | :--------------------------------------------------------------- |
-| `begin(interval, lock, max)` | Init NVS with interval (ms), lockdown (sec), and max commits.    |
+| `begin(interval, lock, max)` | Init NVS with interval (ms), lockdown (ms).    |
 | `update()`                   | **Must be called in `loop()`** to process pending auto-commits.  |
 | `commit()`                   | Manually trigger a write to Flash (subject to Abuse Protection). |
 | `end()`                      | Close NVS handle and cleanup.                                    |
+
+[!CAUTION]
+
+System Maintenance: update()
+
+You must call neuNVS.update() inside your main loop(). This function serves as the system's management engine to:
+Process Heat Decay: Gradually reduces "heat" levels to allow future writes.
+Lockdown Management: Handles the cooldown period and releases the write lock.
+Deferred Commits: Executes pending NVS commits to ensure data persistence and flash efficiency.
+Without regular calls to update(), the thermal protection and wear-leveling logic will be disabled.
 
 ---
 
@@ -262,9 +279,8 @@ if (neuNVS.isLocked()) {
 | `get(id, outValue, default)`   | Retrieve data with XOR validation. Returns `true` if successful.             |
 | `putString(id, value)`         | Store `String` object with XOR protection.                                   |
 | `getString(id, &out, default)` | Retrieve `String` with XOR validation and default value fallback.            |
-| `exists(id)`                   | Returns `true` if the specific ID exists in current namespace.               |
 | `remove(id)`                   | Delete a specific ID and its associated data.                                |
-| `clearAll()`                   | Wipe all data in the current namespace (Factory Reset).                      |
+| `clear()`                   | Wipe all data in the current namespace (Factory Reset).                      |
 | `commit()`                     | Force immediate write to Flash (subject to Abuse Protection).                |
 
 ---
@@ -274,10 +290,14 @@ if (neuNVS.isLocked()) {
 | Method                  | Description                                              |
 | :---------------------- | :------------------------------------------------------- |
 | `isLocked()`            | Returns `true` if hardware lockdown is currently active. |
-| `isValid()`             | Check if instance was created successfully (max 254).    |
-| `getNamespace()`        | Returns current namespace name (e.g., `ns0`).            |
-| `getTotalFreeEntries()` | Get global free NVS entries.                             |
-| `dump(id)`              | Print professional **Hex + ASCII dump** for debugging.   |
+| `getHeat(id)`             | Returns the current "temperature" of a specific ID (0.0 to 10.0). Uses soft-saturation logic. |
+| `getHeatMax()`        | Returns the highest heat level among all stored IDs. Useful for system health monitoring. |
+| `getHeatAvg()` | Returns the average heat level of the entire namespace to monitor overall flash usage.  |
+| `dump()`              | The Diagnostic Window. Prints a complete visual map of Logical IDs, Physical Slots, Heatmaps, and Spare Slots to the Serial Monitor.  |
+
+[Pro Tip] for Developers
+
+Integrating getHeatMax() into your dashboard or telemetry is a great way to monitor how "aggressive" your firmware is towards the ESP32 Flash memory in real-world deployments.
 
 ---
 
@@ -285,14 +305,12 @@ if (neuNVS.isLocked()) {
 
 | Parameter                | Value / Detail                                  |
 | :----------------------- | :---------------------------------------------- |
-| **Namespace Management** | Automatic Rotation (`ns0` to `ns253`)           |
-| **Indexing System**      | ID-based (`uint8_t`), range `0` - `255`         |
-| **Internal Key Format**  | `id[ID]` (e.g., ID 255 becomes key `id255`)     |
-| **Data Overhead**        | **4 Bytes** per entry (2b XOR + 2b Size Header) |
-| **Instance Limit**       | Up to **254** simultaneous instances            |
-| **Default Auto-Commit**  | `1000 ms` (Configurable)                        |
-| **Default Lockdown**     | `5 seconds` duration after `5` rapid commits    |
-| **Storage Engine**       | Native ESP-IDF NVS                              |
+| **Namespace Management** | Automatic Isolation (`ns0` to `ns254`)           |
+| **Indexing System**      | O(1) ID-based (`uint8_t`), range `0` - `63` by default |
+| **Data Overhead**        | **5 Bytes** per entry (Magic + Size + CRC16) |
+| **Default Auto-Commit**  | `200 ms` (Dynamic based on system heat)     |
+| **Default Lockdown**     | `3000 ms` (Configurable)   |
+| **Storage Engine**       | Native ESP-IDF NVS with Custom Mapping Layer      |
 
 ---
 
@@ -308,11 +326,13 @@ if (neuNVS.isLocked()) {
 
 ## Limitations
 
-· POD Types Only: Objects must be Trivially Copyable. Do not use classes with virtual methods or dynamic pointers inside put().
+· POD Types Only: Data must be Trivially Copyable. Do not store objects with virtual methods, pointers, or dynamic containers (like std::vector) directly inside put().
 
-· String Size: Limited by NVS blob constraints (~4000 bytes max).
+· String Size: While NVS supports larger blobs, NeuNVS is optimized for efficiency with a default MAX_BLOB of 256 bytes (Configurable).
 
-· Thread Safety: Not thread-safe for multi-tasking (use Mutex if accessing from different FreeRTOS tasks).
+· Thread Safety: Fully Thread-Safe. Built-in Mutex (Semaphore) protection ensures safe access from multiple FreeRTOS tasks or different CPU cores.
+
+· NVS Partition: Since NeuNVS uses spare slots for wear-leveling, ensure your NVS partition has enough space for PHYS_SLOTS entries.
 
 ---
 
@@ -324,7 +344,7 @@ if (neuNVS.isLocked()) {
 | preferences.getInt("key", 0)       | neuNVS.get(1, 0)           |
 | preferences.putString("str", "hi") | neuNVS.putString(10, "hi") |
 | preferences.getString("str", "")   | neuNVS.getString(10, "")   |
-| preferences.clear()                | neuNVS.clearAll()          |
+| preferences.clear()                | neuNVS.clear()          |
 
 ---
 
