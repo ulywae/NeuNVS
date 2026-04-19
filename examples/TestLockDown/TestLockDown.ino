@@ -11,7 +11,7 @@ struct MyConfig
 
 void neuNVSErrorHandler(NeuNVS_Error e, uint8_t id)
 {
-    Serial.println(F("\n[ 🛡️ NeuNVS EVENT DETECTED ]"));
+    Serial.println(F("\n[ NeuNVS EVENT DETECTED ]"));
     switch (e)
     {
     case NeuNVS_Error::Lock:
