@@ -242,7 +242,7 @@ if (neuNVS.isLocked()) {
 | 7    | `InvalidID` | ID usage is out of range (Check MAX_IDS or PHYS_SLOTS). |
 | 8    | `Migration`     | System Event: NeuNVS is moving your data to a cooler physical slot (Wear Leveling). |
 
-> [!Pro-Tip]
+> [!TIP]
 >
 > Use the Migration event to monitor how intelligently this library is protecting your hardware. If you see this event, it means NeuNVS has just automatically extended the lifespan of your ESP32!
 
@@ -295,7 +295,7 @@ if (neuNVS.isLocked()) {
 | `getHeatAvg()` | Returns the average heat level of the entire namespace to monitor overall flash usage.  |
 | `dump()`              | The Diagnostic Window. Prints a complete visual map of Logical IDs, Physical Slots, Heatmaps, and Spare Slots to the Serial Monitor.  |
 
-> [!Pro Tip] for Developers
+> [!TIP] for Developers
 > 
 > Integrating getHeatMax() into your dashboard or telemetry is a great way to monitor how "aggressive" your firmware is towards the ESP32 Flash memory in real-world deployments.
 
