@@ -194,12 +194,12 @@ void setup() {
 > - **Isolated Scope:** This ID range is **local per-instance**.
 > - **Zero Conflict:** You can store data under `ID 1` in `configStorage` and different data under `ID 1` in `userStorage`. They won't overwrite each other because they're automatically stored in different namespaces (`ns0`, `ns1`, etc.).
 
-[!TIP]
-
-Why 64 IDs? NeuNVS is designed for high-performance and safety. Each ID consumes a small amount of RAM to track its "Heat" and "Migration" status. 64 IDs is the sweet spot for most IoT projects.
-
-Pro Tip: Use Structs!
-Don't waste your IDs by storing single variables (like one ID for age, another for height). Instead, wrap your related data into a struct and store it in one single ID.
+> [!TIP]
+> 
+> Why 64 IDs? NeuNVS is designed for high-performance and safety. Each ID consumes a small amount of RAM to track its "Heat" and "Migration" status. 64 IDs is the sweet spot for most IoT projects.
+>
+> Pro Tip: Use Structs!
+> Don't waste your IDs by storing single variables (like one ID for age, another for height). Instead, wrap your related data into a struct and store it in one single ID.
 
 ```cpp
 struct UserSettings {
@@ -242,9 +242,9 @@ if (neuNVS.isLocked()) {
 | 7    | `InvalidID` | ID usage is out of range (Check MAX_IDS or PHYS_SLOTS). |
 | 8    | `Migration`     | System Event: NeuNVS is moving your data to a cooler physical slot (Wear Leveling). |
 
-[Pro-Tip]
-
-Use the Migration event to monitor how intelligently this library is protecting your hardware. If you see this event, it means NeuNVS has just automatically extended the lifespan of your ESP32!
+> [!Pro-Tip]
+>
+> Use the Migration event to monitor how intelligently this library is protecting your hardware. If you see this event, it means NeuNVS has just automatically extended the lifespan of your ESP32!
 
 ---
 
@@ -259,15 +259,15 @@ Use the Migration event to monitor how intelligently this library is protecting 
 | `commit()`                   | Manually trigger a write to Flash (subject to Abuse Protection). |
 | `end()`                      | Close NVS handle and cleanup.                                    |
 
-[!CAUTION]
-
-System Maintenance: update()
-
-You must call neuNVS.update() inside your main loop(). This function serves as the system's management engine to:
-Process Heat Decay: Gradually reduces "heat" levels to allow future writes.
-Lockdown Management: Handles the cooldown period and releases the write lock.
-Deferred Commits: Executes pending NVS commits to ensure data persistence and flash efficiency.
-Without regular calls to update(), the thermal protection and wear-leveling logic will be disabled.
+> [!CAUTION]
+>
+> System Maintenance: update()
+> 
+> You must call neuNVS.update() inside your main loop(). This function serves as the system's management engine to:
+> Process Heat Decay: Gradually reduces "heat" levels to allow future writes.
+> Lockdown Management: Handles the cooldown period and releases the write lock.
+> Deferred Commits: Executes pending NVS commits to ensure data persistence and flash efficiency.
+> Without regular calls to update(), the thermal protection and wear-leveling logic will be disabled.
 
 ---
 
@@ -295,9 +295,9 @@ Without regular calls to update(), the thermal protection and wear-leveling logi
 | `getHeatAvg()` | Returns the average heat level of the entire namespace to monitor overall flash usage.  |
 | `dump()`              | The Diagnostic Window. Prints a complete visual map of Logical IDs, Physical Slots, Heatmaps, and Spare Slots to the Serial Monitor.  |
 
-[Pro Tip] for Developers
-
-Integrating getHeatMax() into your dashboard or telemetry is a great way to monitor how "aggressive" your firmware is towards the ESP32 Flash memory in real-world deployments.
+> [!Pro Tip] for Developers
+> 
+> Integrating getHeatMax() into your dashboard or telemetry is a great way to monitor how "aggressive" your firmware is towards the ESP32 Flash memory in real-world deployments.
 
 ---
 
