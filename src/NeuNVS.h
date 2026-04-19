@@ -8,34 +8,34 @@
 // ================= CONFIG =================
 namespace NeuNVSConfig
 {
-    static constexpr uint8_t MAX_IDS = 64;
+    static constexpr uint8_t MAX_IDS = 64;             // jumlah ID yang didukung
     static constexpr uint8_t PHYS_SLOTS = MAX_IDS + 8; // Slot fisik yang tersedia di NVS
-    static constexpr uint16_t MAX_BLOB = 256;
+    static constexpr uint16_t MAX_BLOB = 256;          // ukuran maksimum data (payload) per ID, termasuk header internal
 
     static constexpr uint32_t FAST_WINDOW = 50; // ms
-    static constexpr float HEAT_MAX = 10.0f;
-    static constexpr float HEAT_LOCK = 9.5f;
+    static constexpr float HEAT_MAX = 10.0f;    // batas maksimum heat
+    static constexpr float HEAT_LOCK = 9.5f;    // batas lock heat
 
-    static constexpr uint32_t COMMIT_MS = 200;
-    static constexpr uint32_t LOCK_MS = 3000;
+    static constexpr uint32_t COMMIT_MS = 200; // interval commit otomatis
+    static constexpr uint32_t LOCK_MS = 3000;  // durasi lock saat heat terlalu tinggi
 
-    static constexpr float DECAY_RATE = 0.35f;
-    static constexpr float PREDICT_GAIN = 0.15f;
-    static constexpr float THRESHOLD_K = 0.5f;
+    static constexpr float DECAY_RATE = 0.35f;   // decay rate per detik
+    static constexpr float PREDICT_GAIN = 0.15f; // gain untuk prediksi heat masa depan
+    static constexpr float THRESHOLD_K = 0.5f;   // faktor pengurang threshold berdasarkan prediksi
 }
 
 // ================= ERROR =================
 enum class NeuNVS_Error
 {
-    None,       // No error, everything is OK
-    Lock,       // Thermal protection active: writes are throttled to save flash life
-    WriteFail,  // Hardware/NVS failure during write operation
-    ReadFail,   // Data corruption detected (CRC mismatch) or invalid magic number
-    NotFound,   // Data key not found in storage (normal for first-time access)
-    TooLarge,   // Data size exceeds MAX_BLOB or output buffer is too small
-    SystemFail, // Critical system error: NVS init failed or out of RAM for Mutex
-    InvalidID,  // Logical or Physical ID is out of bounds (check MAX_IDS/PHYS_SLOTS)
-    Migration   // System event: Data is being moved to a cooler physical slot
+    None,
+    Lock,
+    WriteFail,
+    ReadFail,
+    NotFound,
+    TooLarge,
+    SystemFail,
+    InvalidID,
+    Migration
 };
 
 using NeuNVS_ErrorCb = void (*)(NeuNVS_Error, uint8_t);
@@ -57,21 +57,16 @@ public:
     template <typename T>
     bool put(uint8_t id, const T &data)
     {
-        // Memastikan tipe data aman untuk disalin mentah-mentah (no pointers/virtual tables)
         static_assert(std::is_trivially_copyable<T>::value,
                       "NeuNVS Error: Data type must be trivially copyable for safe flash storage!");
-
-        // Memastikan ukuran data tidak melebihi batas buffer internal
         static_assert(sizeof(T) <= NeuNVSConfig::MAX_BLOB,
                       "NeuNVS Error: Data size exceeds MAX_BLOB limit!");
-
         return put(id, (const uint8_t *)&data, sizeof(T));
     }
 
     template <typename T>
     bool get(uint8_t id, T &out)
     {
-        // Mencegah pembacaan data ke objek kompleks yang tidak kompatibel
         static_assert(std::is_trivially_copyable<T>::value,
                       "NeuNVS Error: Output type must be trivially copyable!");
         return get(id, (uint8_t *)&out, sizeof(T));
@@ -104,8 +99,9 @@ private:
     bool _write_raw(uint8_t physId, const uint8_t *data, size_t len);
     bool _read_raw(uint8_t physId, uint8_t *out, size_t len);
 
-    // ================= MIGRATION =================
+    // ================= MIGRATION & ALLOC =================
     void _migrate(uint8_t logicalId);
+    int16_t _allocateSlot(); // cari slot fisik kosong terdingin
 
     bool _saveMap();
     bool _loadMap();
@@ -156,4 +152,6 @@ private:
 };
 
 // ================= GLOBAL INSTANCE =================
+#if !defined(NO_GLOBAL_INSTANCES) && !defined(NO_GLOBAL_EEPROM)
 extern NeuNVS neuNVS;
+#endif
