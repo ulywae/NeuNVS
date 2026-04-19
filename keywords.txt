@@ -7,35 +7,42 @@
 #######################################
 
 NeuNVS	KEYWORD1
-neuNVS	LITERAL1
-NeuError	KEYWORD1
+NeuNVS_Error	KEYWORD1
 
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
 
 begin	KEYWORD2
+end	KEYWORD2
 update	KEYWORD2
-commit	KEYWORD2
 put	KEYWORD2
 get	KEYWORD2
 putString	KEYWORD2
 getString	KEYWORD2
-exists	KEYWORD2
 remove	KEYWORD2
-clearAll	KEYWORD2
-dump	KEYWORD2
-getTotalFreeEntries	KEYWORD2
-onError	KEYWORD2
+clear	KEYWORD2
+commit	KEYWORD2
 isLocked	KEYWORD2
-getNamespace	KEYWORD2
+getHeat	KEYWORD2
+getHeatMax	KEYWORD2
+getHeatAvg	KEYWORD2
+dump	KEYWORD2
+onError	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)
 #######################################
 
-ERR_NONE	LITERAL1
-ERR_LOCKDOWN	LITERAL1
-ERR_WRITE_FAILED	LITERAL1
-ERR_ID_NOT_FOUND	LITERAL1
-ERR_DATA_CORRUPT	LITERAL1
+MAX_IDS	LITERAL1
+PHYS_SLOTS	LITERAL1
+MAX_BLOB	LITERAL1
+None	LITERAL1
+Lock	LITERAL1
+WriteFail	LITERAL1
+ReadFail	LITERAL1
+NotFound	LITERAL1
+TooLarge	LITERAL1
+SystemFail	LITERAL1
+InvalidID	LITERAL1
+Migration	LITERAL1
