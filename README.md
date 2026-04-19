@@ -80,7 +80,7 @@ struct UserSettings {
 void setup() {
     Serial.begin(115200);
 
-    // Initialize with 1s auto-commit interval, 3000ms lockdown duration
+    // Initialize with 1000ms auto-commit interval, 3000ms lockdown duration
     if (!neuNVS.begin(1000, 3000)) {
         Serial.println("Failed to initialize NeuNVS!");
         return;
@@ -177,8 +177,8 @@ NeuNVS configStorage;
 NeuNVS userStorage;
 
 void setup() {
-    configStorage.begin(1000, 5, 3);  // ns0
-    userStorage.begin(2000, 10, 5);   // ns1
+    configStorage.begin(1000, 5000);  // ns0
+    userStorage.begin(2000, 1000);    // ns1
 
     configStorage.put(1, 9600);       // Baud rate config
     userStorage.putString(1, "Alice"); // Username
@@ -189,14 +189,14 @@ void setup() {
 >
 > ### ID Scope & Range
 >
-> - **ID Range:** By default, you can use IDs from 0 to 63 (Total 64 IDs).
+> - **ID Range:** By default, you can use IDs from 0 to 31 (Total 32 IDs).
 > - **Flexible Capacity:** Need more? You can easily change MAX_IDS in NeuNVSConfig to suit your needs (up to 254).
 > - **Isolated Scope:** This ID range is **local per-instance**.
 > - **Zero Conflict:** You can store data under `ID 1` in `configStorage` and different data under `ID 1` in `userStorage`. They won't overwrite each other because they're automatically stored in different namespaces (`ns0`, `ns1`, etc.).
 
 > [!TIP]
 > 
-> Why 64 IDs? NeuNVS is designed for high-performance and safety. Each ID consumes a small amount of RAM to track its "Heat" and "Migration" status. 64 IDs is the sweet spot for most IoT projects.
+> Why 32 IDs? NeuNVS is designed for high-performance and safety. Each ID consumes a small amount of RAM to track its "Heat" and "Migration" status. 32 IDs is the sweet spot for most IoT projects.
 >
 > Pro Tip: Use Structs!
 > Don't waste your IDs by storing single variables (like one ID for age, another for height). Instead, wrap your related data into a struct and store it in one single ID.
@@ -232,12 +232,12 @@ if (neuNVS.isLocked()) {
 
 | Code | Name                   | Description                                        |
 | :--- | :--------------------- | :------------------------------------------------- |
-| 0    | `None	`             | No error. Everything is running normally.                            |
+| 0    | `None	`             | No error. Everything is running normally.    |
 | 1    | `Lock`         | Thermal Protection Active!  |
-| 2    | `WriteFail`     | Flash write operation failed at NVS level.         |
-| 3    | `ReadFail`      | Failed to read data from flash memory.             |
-| 4    | `NotFound`     | Requested ID doesn't exist.                        |
-| 5    | `TooLarge`     | Data size exceeds MAX_BLOB (256 bytes).        |
+| 2    | `WriteFail`     | Flash write operation failed at NVS level.  |
+| 3    | `ReadFail`      | Failed to read data from flash memory.  |
+| 4    | `NotFound`     | Requested ID doesn't exist.   |
+| 5    | `TooLarge`     | Data size exceeds MAX_BLOB (256 bytes).  |
 | 6    | `SystemFail`    | Failed NVS initialization or out of RAM |
 | 7    | `InvalidID` | ID usage is out of range (Check MAX_IDS or PHYS_SLOTS). |
 | 8    | `Migration`     | System Event: NeuNVS is moving your data to a cooler physical slot (Wear Leveling). |
@@ -308,7 +308,7 @@ if (neuNVS.isLocked()) {
 | Parameter                | Value / Detail                                  |
 | :----------------------- | :---------------------------------------------- |
 | **Namespace Management** | Automatic Isolation (`ns0` to `ns254`)           |
-| **Indexing System**      | O(1) ID-based (`uint8_t`), range `0` - `63` by default |
+| **Indexing System**      | O(1) ID-based (`uint8_t`), range `0` - `31` by default |
 | **Data Overhead**        | **5 Bytes** per entry (Magic + Size + CRC16) |
 | **Default Auto-Commit**  | `200 ms` (Dynamic based on system heat)     |
 | **Default Lockdown**     | `3000 ms` (Configurable)   |
