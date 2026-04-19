@@ -8,7 +8,7 @@
 // ================= CONFIG =================
 namespace NeuNVSConfig
 {
-    static constexpr uint8_t MAX_IDS = 64;             // jumlah ID yang didukung
+    static constexpr uint8_t MAX_IDS = 32;             // jumlah ID yang didukung, modifikasi jika perlu
     static constexpr uint8_t PHYS_SLOTS = MAX_IDS + 8; // Slot fisik yang tersedia di NVS
     static constexpr uint16_t MAX_BLOB = 256;          // ukuran maksimum data (payload) per ID, termasuk header internal
 
