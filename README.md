@@ -4,7 +4,7 @@
 
 NeuNVS is a next-generation storage library for the ESP32, designed as a high-performance, intelligent alternative to the standard Preferences and EEPROM libraries.
 
-NeuNVS isn't just a simple wrapper around NVS; it is a Flash Management System built with the instinct to protect your ESP32 hardware from premature death caused by excessive write cycles (flash burnout). It doesn't just store data—it actively guards your hardware using an Intelligent Virtual Heat Meter algorithm. Much like a CPU's thermal protection system, it monitors write pressure and manages your Flash memory's longevity autonomously.
+NeuNVS isn't just a simple wrapper around NVS, it is a Flash Management System built with the instinct to protect your ESP32 hardware from premature death caused by excessive write cycles (flash burnout). It doesn't just store data—it actively guards your hardware using an Intelligent Virtual Heat Meter algorithm. Much like a CPU's thermal protection system, it monitors write pressure and manages your Flash memory's longevity autonomously.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform: ESP32](https://img.shields.io/badge/Platform-ESP32-blue?logo=espressif&logoColor=white)](https://espressif.com)
@@ -41,7 +41,7 @@ Standard libraries often neglect hardware health and data integrity.
 
 - **Zero-Copy Performance:** High-speed data retrieval with minimal CPU overhead. No unnecessary dynamic memory allocation for POD types.
 
-- **Diagnostic Window:** Built-in dump() feature that gives you a "God View" of your storage health, heatmap, and physical slot mapping.
+- **Diagnostic Window:** Built-in dump() feature that gives you a "View" of your storage health, heatmap, and physical slot mapping.
 
 ---
 
