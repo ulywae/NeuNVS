@@ -88,6 +88,7 @@ public:
     float getHeatAvg() const;
     uint32_t lastHeatUpdate = 0;
     void dump();
+    void dump(uint8_t id);
 
     // ===== CALLBACK =====
     void onError(NeuNVS_ErrorCb cb);
