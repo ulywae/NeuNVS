@@ -212,8 +212,9 @@ bool NeuNVS::remove(uint8_t id)
 // ================= CLEAR =================
 bool NeuNVS::clear()
 {
-    if (!xSemaphoreTake(_m, 10))
+    if (!xSemaphoreTake(_m, 100))
         return false;
+  
     bool ok = (nvs_erase_all(_h) == ESP_OK);
     if (ok)
     {
