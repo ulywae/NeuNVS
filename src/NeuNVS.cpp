@@ -199,7 +199,11 @@ bool NeuNVS::remove(uint8_t id)
         _map[id] = 255;
         _revMap[phys] = 255;
         _heatMap[id] = 0.0f;
+        _heatVelocity[id] = 0.0f;
+        _lastHeat[id] = 0.0f;
+        _slotHeat[phys] = 0.0f;
         _dirty = true;
+        _saveMap();
     }
     xSemaphoreGive(_m);
     return ok;
