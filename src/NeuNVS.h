@@ -86,6 +86,7 @@ public:
     float getHeat(uint8_t id) const;
     float getHeatMax() const;
     float getHeatAvg() const;
+    uint32_t lastHeatUpdate = 0;
     void dump();
 
     // ===== CALLBACK =====
