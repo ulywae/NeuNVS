@@ -222,6 +222,8 @@ bool NeuNVS::clear()
             _map[i] = i;
             _heatMap[i] = 0.0f;
             _heatVelocity[i] = 0.0f;
+            _lastHeat[i] = 0.0f;
+            _lastWriteMap[i] = 0;
         }
         for (uint8_t i = 0; i < NeuNVSConfig::PHYS_SLOTS; i++)
         {
@@ -229,6 +231,7 @@ bool NeuNVS::clear()
             _slotHeat[i] = 0.0f;
         }
         _dirty = false;
+        nvs_set_blob(_h, "sys_map", _map, sizeof(_map));
         nvs_commit(_h);
     }
     xSemaphoreGive(_m);
