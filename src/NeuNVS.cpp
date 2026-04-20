@@ -110,7 +110,6 @@ void NeuNVS::update()
 
     uint32_t now = millis();
 
-    static uint32_t lastHeatUpdate = 0;
     int32_t diff = (int32_t)(now - lastHeatUpdate);
     if (diff < 20)
         return;
