@@ -50,7 +50,7 @@ bool NeuNVS::_write(uint8_t id, const uint8_t *data, size_t len)
     if (_heatMap[id] > NeuNVSConfig::HEAT_MAX)
         _heatMap[id] = NeuNVSConfig::HEAT_MAX;
 
-    // FIX #4: cek migrasi SEBELUM threshold
+    // cek migrasi SEBELUM threshold
     if (_heatMap[id] >= (NeuNVSConfig::HEAT_LOCK * 0.85f))
         _migrate(id);
 
