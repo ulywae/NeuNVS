@@ -75,8 +75,6 @@ void NeuNVS::_migrate(uint8_t logicalId)
     _revMap[oldPhys] = 255;
     _map[logicalId] = (uint8_t)newPhys;
     _revMap[newPhys] = logicalId;
-
-    // Perbaikan #3: sinkronkan heat slot baru
     _slotHeat[newPhys] = _heatMap[logicalId];
 
     _saveMap();
