@@ -362,6 +362,11 @@ Created by Ulywae @ Neu
 
 ---
 
+**Note:**  
+This is primarily my personal toolkit. If you find it useful, use it however you like; if you don’t, that’s fine too — it still does its job for me.
+
+---
+
 ## Contributing
 
 Issues and pull requests are welcome! For major changes, please open an issue first to discuss.
