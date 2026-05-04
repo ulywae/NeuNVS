@@ -362,11 +362,6 @@ Created by Ulywae @ Neu
 
 ---
 
-**Note:**  
-This is primarily my personal toolkit. If you find it useful, use it however you like; if you don’t, that’s fine too — it still does its job for me.
-
----
-
 ## Contributing
 
 Issues and pull requests are welcome! For major changes, please open an issue first to discuss.
@@ -377,5 +372,10 @@ Issues and pull requests are welcome! For major changes, please open an issue fi
 
 If this project helps you, please consider giving it a ⭐! 
 It helps others find the repository and keeps me motivated to add more features.
+
+---
+
+**Note:**  
+This is primarily my personal toolkit. If you find it useful, use it however you like. If you don’t, that’s fine too — it still does its job for me.
 
 ---
